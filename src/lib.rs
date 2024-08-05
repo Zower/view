@@ -1,26 +1,47 @@
-use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, Reflect, TypeRegistry};
+use std::ops::{Deref, DerefMut};
 
+use app::App;
+use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, Reflect};
+
+mod app;
 mod elements;
 pub mod patch;
+mod runner;
+mod start;
 
-use crossbeam::channel::TryRecvError;
 pub use elements::*;
 
-pub fn run<V: View + GetTypeRegistration + GetPath>(mut v: V) {
-    let mut type_registry = TypeRegistry::new();
+use crossbeam::channel::TryRecvError;
+use femtovg::renderer::OpenGl;
+use runner::Runner;
 
-    type_registry.register::<V>();
+pub type Result<T> = miette::Result<T>;
 
-    let mut built = v.build();
+pub type Point = taffy::Point<u32>;
+pub type Size = taffy::Size<u32>;
+pub type Rect = taffy::Rect<u32>;
+pub type Color = femtovg::Color;
 
-    iter_elements(&mut built, &|el| {
-        let el = dbg!(el);
-        el.clicked();
-    });
+pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
+    let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
 
-    iter_views(&type_registry, &mut v, &|item| {
-        item.messages();
-    });
+    // iter_elements(&mut built, &|el| {
+    //     let el = dbg!(el);
+    // });
+
+    // iter_views(&type_registry, &mut v, &|item| {
+    //     item.messages();
+    // });
+
+    let app = App::new(v, window.inner_size());
+
+    Runner {
+        el,
+        canvas: Canvas { inner: canvas },
+        window: (surface, window),
+        gl_context: pcc,
+    }
+    .run(app)
 }
 
 #[reflect_trait]
@@ -35,56 +56,45 @@ impl<V: View> From<&V> for Element {
     }
 }
 
-#[enum_delegate::register]
-pub trait ElementTrait {
-    fn clicked(&mut self) {}
-    fn children(&mut self) -> &mut [Element];
+pub struct Canvas {
+    inner: femtovg::Canvas<OpenGl>,
 }
 
-#[derive(Debug)]
-#[enum_delegate::implement(ElementTrait)]
-pub enum Element {
-    Button(elements::Button),
-    Text(elements::Text),
-    Stack(elements::Stack),
-}
+impl Deref for Canvas {
+    type Target = femtovg::Canvas<OpenGl>;
 
-pub trait ChildView<F> {
-    fn to_element_vec(self) -> Vec<Element>;
-}
-
-impl<A: Into<Element>> ChildView<(A,)> for A {
-    fn to_element_vec(self) -> Vec<Element> {
-        vec![self.into()]
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
-impl<A: Into<Element>, B: Into<Element>> ChildView<(A, B)> for (A, B) {
-    fn to_element_vec(self) -> Vec<Element> {
-        vec![self.0.into(), self.1.into()]
+
+impl DerefMut for Canvas {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
 
 #[derive(Reflect, Debug)]
 pub struct Messages<M> {
     #[reflect(ignore)]
-    inner: Inner<M>,
+    inner: MessageInner<M>,
 }
 
 impl<M> Default for Messages<M> {
     fn default() -> Self {
         Self {
-            inner: Inner::default(),
+            inner: MessageInner::default(),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Inner<M> {
+pub struct MessageInner<M> {
     rx: crossbeam::channel::Receiver<M>,
     tx: crossbeam::channel::Sender<M>,
 }
 
-impl<M> Default for Inner<M> {
+impl<M> Default for MessageInner<M> {
     fn default() -> Self {
         let (tx, rx) = crossbeam::channel::unbounded();
         Self { rx, tx }
@@ -112,16 +122,72 @@ impl<M: Clone + 'static> Messages<M> {
             })
             .ok()
     }
+}
 
-    // pub fn send(&self, m: M) -> bool {
-    //     let Ok(mut data) = self.data.lock() else {
-    //         return false;
-    //     };
+#[derive(Debug, Copy, Clone)]
+pub struct Layout {
+    /// The relative ordering of the node
+    ///
+    /// Nodes with a higher order should be rendered on top of those with a lower order.
+    /// This is effectively a topological sort of each tree.
+    pub order: u32,
+    /// The top-left corner of the node
+    pub location: Point,
+    /// The width and height of the node
+    pub size: Size,
+    // #[cfg(feature = "content_size")]
+    // /// The width and height of the content inside the node. This may be larger than the size of the node in the case of
+    // /// overflowing content and is useful for computing a "scroll width/height" for scrollable nodes
+    // pub content_size: Size<f32>,
+    /// The size of the scrollbars in each dimension. If there is no scrollbar then the size will be zero.
+    pub scrollbar_size: Size,
+    /// The size of the borders of the node
+    pub border: Rect,
+    /// The size of the padding of the node
+    pub padding: Rect,
+}
 
-    //     data.push(m);
+impl Layout {
+    pub fn plus_location(&mut self, location: Point) -> &mut Self {
+        self.location = Point {
+            x: self.location.x + location.x,
+            y: self.location.y + location.y,
+        };
 
-    //     true
-    // }
+        self
+    }
+}
+
+impl From<taffy::Layout> for Layout {
+    fn from(value: taffy::Layout) -> Self {
+        fn map_size(p: taffy::Size<f32>) -> Size {
+            Size {
+                width: p.width as u32,
+                height: p.height as u32,
+            }
+        }
+
+        fn map_rect(p: taffy::Rect<f32>) -> Rect {
+            Rect {
+                left: p.left as u32,
+                right: p.right as u32,
+                top: p.top as u32,
+                bottom: p.bottom as u32,
+            }
+        }
+
+        Self {
+            order: value.order,
+            location: Point {
+                x: value.location.x as u32,
+                y: value.location.y as u32,
+            },
+            size: map_size(value.size),
+            scrollbar_size: map_size(value.scrollbar_size),
+            border: map_rect(value.border),
+            padding: map_rect(value.padding),
+        }
+    }
 }
 
 pub struct SendableMessage {
@@ -134,57 +200,4 @@ impl SendableMessage {
     }
 }
 
-fn iter_views(reg: &TypeRegistry, item: &mut dyn Reflect, f: &impl Fn(&mut dyn View)) {
-    let t = reg.get_type_data::<ReflectView>(item.type_id());
-
-    match t {
-        Some(it) => {
-            let v: &mut dyn View = it.get_mut(item).unwrap();
-            f(v)
-        }
-        None => {}
-    }
-
-    match item.reflect_mut() {
-        bevy_reflect::ReflectMut::Struct(s) => {
-            // iter(reg, s.iter_fields(), f)
-            let mut index = 0;
-
-            while let Some(item) = s.field_at_mut(index) {
-                index += 1;
-
-                iter_views(reg, item, f)
-            }
-        }
-        // bevy_reflect::ReflectRef::Struct(s) => {
-        //     for item in s.iter_fields() {
-        //         iter_views(reg, item, f)
-        //     }
-        // }
-        // bevy_reflect::ReflectRef::TupleStruct(_) => todo!(),
-        // bevy_reflect::ReflectRef::Tuple(_) => todo!(),
-        // bevy_reflect::ReflectRef::List(_) => todo!(),
-        // bevy_reflect::ReflectRef::Array(_) => todo!(),
-        // bevy_reflect::ReflectRef::Map(_) => todo!(),
-        bevy_reflect::ReflectMut::Enum(e) => {
-            // iter(reg, e.iter_fields().map(|it| it.value()), f)
-            let mut index = 0;
-
-            while let Some(item) = e.field_at_mut(index) {
-                index += 1;
-
-                iter_views(reg, item, f)
-            }
-        }
-        bevy_reflect::ReflectMut::Value(_) => {}
-        _ => todo!(), // bevy_reflect::ReflectRef::Value(_) => todo!(),
-    }
-}
-
-fn iter_elements(item: &mut Element, f: &impl Fn(&mut Element)) {
-    f(item);
-
-    for item in item.children() {
-        iter_elements(item, f)
-    }
-}
+pub enum GlobalEvent {}

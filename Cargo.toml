@@ -3,9 +3,39 @@ name = "view"
 version = "0.1.0"
 edition = "2021"
 
+[workspace]
+
 [dependencies]
 bevy_reflect = "0.14.1"
 bon = "1.0.6"
 crossbeam = "0.8.4"
 enum_delegate = "0.2.0"
 serde_json = "1.0.122"
+femtovg = { git = "https://github.com/Zower/femtovg.git", default-features = false, features = [
+    "glutin",
+] }
+glutin = { version = "0.31.1" }
+glutin-winit = "0.4.2"
+imgref = "1.10.0"
+raw-window-handle = "0.5.2"
+# serde.workspace = true
+winit.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+# tracing.workspace = true
+# tracing-subscriber.workspace = true
+# tracing-error.workspace = true
+lsp-types.workspace = true
+miette.workspace = true
+taffy = "0.5.2"
+
+[workspace.dependencies]
+tree-sitter = "0.22.2"
+tree-sitter-rust = { git = "https://github.com/Zower/tree-sitter-rust.git" }
+# tracing = "0.1.40"
+serde = { version = "1.0.192", features = ["derive"] }
+# tracing-subscriber = { version = "0.3.18", features = ["std", "env-filter"] }
+# tracing-error = "0.2.0"
+winit = { version = "0.29.3", features = ["serde"] }
+lsp-types = "0.95.0"
+miette = { version = "5.7.0", features = ["fancy"] }

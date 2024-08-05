@@ -1,13 +1,62 @@
+use std::ops::{Deref, DerefMut};
+
 pub use button::*;
 pub use stack::Stack;
+use taffy::prelude::auto;
 pub use text::Text;
+
+use crate::Canvas;
+
+#[derive(Debug)]
+#[enum_delegate::implement(ElementTrait)]
+pub enum Element {
+    Button(Button),
+    Text(Text),
+    Stack(Stack),
+}
+
+#[enum_delegate::register]
+pub trait ElementTrait {
+    #[allow(unused_variables)]
+    fn event(&mut self, event: ElementEvent) {}
+
+    fn style(&self) -> Style {
+        Style::default()
+    }
+
+    #[allow(unused_variables)]
+    fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
+
+    fn consume(self) -> (Element, Option<Vec<Element>>);
+}
+
+#[derive(Debug, Clone)]
+pub struct Style(pub taffy::Style);
+
+impl Default for Style {
+    fn default() -> Self {
+        Self(taffy::Style {
+            size: taffy::Size {
+                width: taffy::Dimension::Percent(1.),
+                height: auto(),
+            },
+            ..Default::default()
+        })
+    }
+}
+
+pub enum ElementEvent {
+    Click(u32, u32),
+}
 
 mod button {
     use std::fmt::Debug;
 
     use bon::builder;
 
-    use crate::{ElementTrait, SendableMessage};
+    use crate::{Color, Layout, SendableMessage};
+
+    use super::{Element, ElementEvent, ElementTrait};
 
     pub struct Button(SendableMessage);
 
@@ -18,13 +67,25 @@ mod button {
     }
 
     impl ElementTrait for Button {
-        fn clicked(&mut self) {
-            println!("Clicking");
-            self.0.send()
+        fn event(&mut self, event: ElementEvent) {
+            match event {
+                ElementEvent::Click(_, _) => self.0.send(),
+            };
         }
 
-        fn children(&mut self) -> &mut [crate::Element] {
-            &mut []
+        fn render(&self, layout: Layout, canvas: &mut crate::Canvas) {
+            dbg!(&layout);
+            canvas.clear_rect(
+                layout.location.x,
+                layout.location.y,
+                layout.size.width,
+                layout.size.height,
+                Color::rgb(200, 130, 90),
+            );
+        }
+
+        fn consume(self) -> (Element, Option<Vec<Element>>) {
+            (self.into(), None)
         }
     }
 
@@ -35,37 +96,68 @@ mod button {
 }
 
 mod text {
-    use crate::{Element, ElementTrait};
+    use super::{Element, ElementTrait};
 
     #[derive(Debug)]
     pub struct Text;
 
     impl ElementTrait for Text {
-        fn children(&mut self) -> &mut [Element] {
-            &mut []
+        fn consume(self) -> (Element, Option<Vec<Element>>) {
+            (self.into(), None)
         }
     }
 }
 
 mod stack {
-    use crate::{ChildView, Element, ElementTrait};
+
+    use super::{ChildView, Element, ElementTrait};
 
     #[derive(Debug)]
     pub struct Stack {
-        tuple: Vec<Element>,
+        tuple: Option<Vec<Element>>,
     }
 
     impl ElementTrait for Stack {
-        fn children(&mut self) -> &mut [Element] {
-            &mut self.tuple
+        fn consume(mut self) -> (Element, Option<Vec<Element>>) {
+            let tuple = self.tuple.take();
+            (self.into(), tuple)
         }
     }
 
     impl Stack {
         pub fn new<F>(child: impl ChildView<F>) -> Self {
             Self {
-                tuple: child.to_element_vec(),
+                tuple: Some(child.to_element_vec()),
             }
         }
+    }
+}
+
+pub trait ChildView<F> {
+    fn to_element_vec(self) -> Vec<Element>;
+}
+
+impl<A: Into<Element>> ChildView<(A,)> for A {
+    fn to_element_vec(self) -> Vec<Element> {
+        vec![self.into()]
+    }
+}
+impl<A: Into<Element>, B: Into<Element>> ChildView<(A, B)> for (A, B) {
+    fn to_element_vec(self) -> Vec<Element> {
+        vec![self.0.into(), self.1.into()]
+    }
+}
+
+impl Deref for Style {
+    type Target = taffy::Style;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Style {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }

@@ -1,10 +1,10 @@
 use bevy_reflect::Reflect;
 use view::{button, run, Element, Messages, ReflectView, Stack, Text, View};
 
-fn main() {
+fn main() -> view::Result<()> {
     run(MyView {
         second: MySecondView::default(),
-    });
+    })
 }
 
 #[derive(Reflect, Debug, Clone)]
@@ -35,10 +35,10 @@ struct MySecondView {
 impl View for MySecondView {
     fn build(&self) -> Element {
         Stack::new((
-            &self.view,
             button()
                 .on_click(self.messages.send(MySecondViewMessage::Clicked))
                 .call(),
+            &self.view,
         ))
         .into()
     }
