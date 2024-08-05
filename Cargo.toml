@@ -1,0 +1,11 @@
+[package]
+name = "view"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy_reflect = "0.14.1"
+bon = "1.0.6"
+crossbeam = "0.8.4"
+enum_delegate = "0.2.0"
+serde_json = "1.0.122"
