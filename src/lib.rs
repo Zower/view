@@ -8,7 +8,9 @@ mod elements;
 pub mod patch;
 mod runner;
 mod start;
+mod text;
 
+use cosmic_text::FontSystem;
 pub use elements::*;
 
 use crossbeam::channel::TryRecvError;
@@ -20,24 +22,21 @@ pub type Result<T> = miette::Result<T>;
 pub type Point = taffy::Point<u32>;
 pub type Size = taffy::Size<u32>;
 pub type Rect = taffy::Rect<u32>;
-pub type Color = femtovg::Color;
+
+pub struct Color(femtovg::Color);
 
 pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
     let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
 
-    // iter_elements(&mut built, &|el| {
-    //     let el = dbg!(el);
-    // });
-
-    // iter_views(&type_registry, &mut v, &|item| {
-    //     item.messages();
-    // });
-
     let app = App::new(v, window.inner_size());
+    let cache = text::init_cache();
 
     Runner {
         el,
-        canvas: Canvas { inner: canvas },
+        canvas: Canvas {
+            inner: canvas,
+            text_cache: cache,
+        },
         window: (surface, window),
         gl_context: pcc,
     }
@@ -50,14 +49,15 @@ pub trait View: Reflect {
     fn messages(&mut self) {}
 }
 
-impl<V: View> From<&V> for Element {
-    fn from(value: &V) -> Self {
-        value.build()
-    }
-}
-
 pub struct Canvas {
     inner: femtovg::Canvas<OpenGl>,
+    pub text_cache: text::RenderCache,
+}
+
+impl Canvas {
+    pub fn font_system(&mut self) -> &mut FontSystem {
+        &mut self.text_cache.font_system
+    }
 }
 
 impl Deref for Canvas {
@@ -74,10 +74,22 @@ impl DerefMut for Canvas {
     }
 }
 
+#[reflect_trait]
+pub trait State {
+    fn is_dirty(&self) -> bool;
+}
+
 #[derive(Reflect, Debug)]
+#[reflect(State)]
 pub struct Messages<M> {
     #[reflect(ignore)]
     inner: MessageInner<M>,
+}
+
+impl<M> State for Messages<M> {
+    fn is_dirty(&self) -> bool {
+        !self.inner.rx.is_empty()
+    }
 }
 
 impl<M> Default for Messages<M> {
@@ -102,9 +114,9 @@ impl<M> Default for MessageInner<M> {
 }
 
 impl<M: Clone + 'static> Messages<M> {
-    pub fn send(&self, message: M) -> SendableMessage {
+    pub fn send(&self, message: M) -> Triggerable {
         let sender = self.inner.tx.clone();
-        SendableMessage {
+        Triggerable {
             f: Box::new(move || {
                 sender.send(message.clone()).expect("Failed to send");
             }),
@@ -148,7 +160,7 @@ pub struct Layout {
 }
 
 impl Layout {
-    pub fn plus_location(&mut self, location: Point) -> &mut Self {
+    pub fn plus_location(mut self, location: Point) -> Self {
         self.location = Point {
             x: self.location.x + location.x,
             y: self.location.y + location.y,
@@ -190,14 +202,47 @@ impl From<taffy::Layout> for Layout {
     }
 }
 
-pub struct SendableMessage {
+pub struct Triggerable {
     f: Box<dyn Fn()>,
 }
 
-impl SendableMessage {
-    pub fn send(&self) {
+impl Triggerable {
+    pub fn trigger(&self) {
         (self.f)()
     }
 }
 
 pub enum GlobalEvent {}
+
+impl Color {
+    pub fn rgb(r: u8, b: u8, g: u8) -> Self {
+        Self(femtovg::Color::rgb(r, g, b))
+    }
+
+    pub fn rgba(r: u8, b: u8, g: u8, a: u8) -> Self {
+        Self(femtovg::Color::rgba(r, g, b, a))
+    }
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Self(femtovg::Color::white())
+    }
+}
+
+impl From<Color> for cosmic_text::Color {
+    fn from(value: Color) -> Self {
+        cosmic_text::Color::rgba(
+            (value.0.r * 255.) as u8,
+            (value.0.g * 255.) as u8,
+            (value.0.b * 255.) as u8,
+            (value.0.a * 255.) as u8,
+        )
+    }
+}
+
+impl From<Color> for femtovg::Color {
+    fn from(value: Color) -> Self {
+        value.0
+    }
+}

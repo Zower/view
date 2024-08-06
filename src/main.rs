@@ -1,5 +1,5 @@
 use bevy_reflect::Reflect;
-use view::{button, run, Element, Messages, ReflectView, Stack, Text, View};
+use view::{hstack, run, Button, Element, Messages, ReflectView, Text, View};
 
 fn main() -> view::Result<()> {
     run(MyView {
@@ -20,7 +20,7 @@ struct MyView {
 
 impl View for MyView {
     fn build(&self) -> Element {
-        Stack::new((Text, &self.second)).into()
+        (&self.second).into()
     }
 }
 
@@ -28,16 +28,15 @@ impl View for MyView {
 #[reflect(View)]
 struct MySecondView {
     messages: Messages<MySecondViewMessage>,
-    view: Third,
+    view: PlusOne,
     data: u64,
 }
 
 impl View for MySecondView {
     fn build(&self) -> Element {
-        Stack::new((
-            button()
-                .on_click(self.messages.send(MySecondViewMessage::Clicked))
-                .call(),
+        hstack((
+            Text::builder().text("Hey from second!").build(),
+            Button::on_click(self.messages.send(MySecondViewMessage::Clicked)),
             &self.view,
         ))
         .into()
@@ -45,17 +44,22 @@ impl View for MySecondView {
 
     fn messages(&mut self) {
         while let Some(message) = self.messages.recv() {
-            dbg!(message);
+            match message {
+                MySecondViewMessage::Clicked => {
+                    self.data += 1;
+                    self.view.0 = self.data + 1;
+                }
+            }
         }
     }
 }
 
 #[derive(Reflect, Default, Debug)]
 #[reflect(View)]
-struct Third;
+struct PlusOne(u64);
 
-impl View for Third {
+impl View for PlusOne {
     fn build(&self) -> Element {
-        Text.into()
+        Text::builder().text(format!("{}", self.0)).build().into()
     }
 }

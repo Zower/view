@@ -1,12 +1,16 @@
+use std::time::Instant;
+
 use glutin::{prelude::PossiblyCurrentGlContext, surface::GlSurface};
 use miette::IntoDiagnostic;
 use winit::{
-    dpi::PhysicalPosition,
     event::{ElementState, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
 };
 
-use crate::{app::App, Canvas, GlobalEvent, View};
+use crate::{
+    app::{App, AppEvent},
+    Canvas, GlobalEvent, Point, View,
+};
 
 pub struct Runner {
     pub el: EventLoop<GlobalEvent>,
@@ -38,7 +42,7 @@ impl Runner {
         // app.startup();
         // app.logic();
 
-        let mut mouse_pos = PhysicalPosition::new(0f64, 0f64);
+        let mut mouse_pos = Point { x: 0, y: 0 };
 
         el.run(move |event, target| {
             match event {
@@ -83,13 +87,18 @@ impl Runner {
                         WindowEvent::CloseRequested => target.exit(),
                         WindowEvent::ModifiersChanged(_modifiers) => {}
                         WindowEvent::CursorMoved { position, .. } => {
-                            mouse_pos = position;
+                            mouse_pos = Point {
+                                x: position.x as u32,
+                                y: position.y as u32,
+                            };
                         }
                         WindowEvent::MouseInput {
                             state: ElementState::Pressed,
                             ..
                         } => {
-                            dbg!("Click");
+                            let now = Instant::now();
+                            app.event(AppEvent::Clicked(mouse_pos.x, mouse_pos.y));
+                            dbg!(now.elapsed());
                             // warn!("Unused mouse input");
 
                             // let window = &windows[&window_id];
