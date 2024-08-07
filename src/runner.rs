@@ -74,6 +74,14 @@ impl Runner {
                                 .make_current(&initial_surface)
                                 .expect("Making current to work");
 
+                            canvas.clear_rect(
+                                0,
+                                0,
+                                initial_window.inner_size().width,
+                                initial_window.inner_size().height,
+                                femtovg::Color::black(),
+                            );
+
                             app.paint(initial_window.inner_size(), &mut canvas);
 
                             canvas.flush();
@@ -81,7 +89,6 @@ impl Runner {
                             initial_surface
                                 .swap_buffers(&gl_context)
                                 .expect("Swapping buffer to work");
-                            // app.paint();
                         }
 
                         WindowEvent::CloseRequested => target.exit(),
@@ -103,7 +110,7 @@ impl Runner {
 
                             // let window = &windows[&window_id];
 
-                            // window.inner.request_redraw();
+                            initial_window.request_redraw();
                         }
                         WindowEvent::MouseWheel { delta, .. } => {
                             let _pixels = match delta {

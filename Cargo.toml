@@ -31,6 +31,7 @@ tree-sitter-rust.workspace = true
 lsp-types.workspace = true
 miette.workspace = true
 taffy = "0.5.2"
+const_format = "0.2.32"
 
 [workspace.dependencies]
 tree-sitter = "0.22.2"

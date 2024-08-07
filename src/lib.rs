@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use app::App;
-use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, Reflect};
+use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, ParsedPath, Reflect};
 
 mod app;
 mod elements;
@@ -244,5 +244,37 @@ impl From<Color> for cosmic_text::Color {
 impl From<Color> for femtovg::Color {
     fn from(value: Color) -> Self {
         value.0
+    }
+}
+
+#[macro_export]
+macro_rules! view {
+    ($view:expr) => {{
+        fn assert_view<V: View>(v: &V) {}
+
+        let _ = &$view;
+        assert_view($view);
+
+        ::bevy_reflect::ParsedPath::parse_static(::const_format::str_replace!(
+            stringify!($view),
+            "&self",
+            ""
+        ))
+        .unwrap()
+    }};
+}
+
+impl From<ParsedPath> for ElementOrPath {
+    fn from(value: ParsedPath) -> Self {
+        ElementOrPath::Path(value)
+    }
+}
+
+impl From<ParsedPath> for Element {
+    fn from(value: ParsedPath) -> Self {
+        Element {
+            el: HStack.into(),
+            children: Some(vec![ElementOrPath::Path(value)]),
+        }
     }
 }

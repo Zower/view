@@ -1,12 +1,13 @@
 use std::ops::{Deref, DerefMut};
 
+use bevy_reflect::ParsedPath;
 pub use button::*;
 pub use stack::HStack;
 pub use stack::*;
 use taffy::prelude::auto;
 pub use text::*;
 
-use crate::{Canvas, View};
+use crate::Canvas;
 
 #[enum_delegate::register]
 pub trait MountedElementBehaviour {
@@ -22,6 +23,8 @@ pub trait MountedElementBehaviour {
 
     #[allow(unused_variables)]
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
+
+    fn needs_rebuild(&self, new: &Self) -> bool;
 }
 
 #[derive(Debug)]
@@ -32,16 +35,32 @@ pub(crate) enum MountableElement {
     HStack(HStack),
 }
 
-impl<T: View> From<&T> for Element {
-    fn from(value: &T) -> Self {
-        value.build()
+impl MountableElement {
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            MountableElement::Button(_) => "button",
+            MountableElement::Text(_) => "text",
+            MountableElement::HStack(_) => "hstack",
+        }
     }
+}
+
+// impl<T: View> From<&T> for Element {
+//     fn from(value: &T) -> Self {
+//         value.build()
+//     }
+// }
+
+#[derive(Debug)]
+pub enum ElementOrPath {
+    Element(Element),
+    Path(ParsedPath),
 }
 
 #[derive(Debug)]
 pub struct Element {
     pub(crate) el: MountableElement,
-    pub(crate) children: Option<Vec<Element>>,
+    pub(crate) children: Option<Vec<ElementOrPath>>,
 }
 
 impl Element {
@@ -84,7 +103,7 @@ mod button {
 
     use crate::{Color, Layout, Triggerable};
 
-    use super::{Element, ElementEvent, MountedElementBehaviour};
+    use super::{Element, ElementEvent, ElementOrPath, MountedElementBehaviour};
 
     #[builder]
     pub struct Button {
@@ -97,15 +116,21 @@ mod button {
         }
     }
 
-    impl From<Button> for Element {
+    impl From<Button> for ElementOrPath {
         fn from(value: Button) -> Self {
-            Element::no_children(value.into())
+            ElementOrPath::Element(Element::no_children(value.into()))
         }
     }
 
     impl Debug for Button {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_tuple("Button").finish()
+        }
+    }
+
+    impl PartialEq for Button {
+        fn eq(&self, _other: &Self) -> bool {
+            false
         }
     }
 
@@ -125,6 +150,10 @@ mod button {
                 Color::rgb(200, 130, 90).into(),
             );
         }
+
+        fn needs_rebuild(&self, new: &Self) -> bool {
+            true
+        }
     }
 
     // pub fn button(on_click: Triggerable) -> Button {
@@ -136,7 +165,7 @@ mod text {
     use bon::bon;
     use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, Metrics};
 
-    use super::{Element, MountedElementBehaviour};
+    use super::{Element, ElementOrPath, MountedElementBehaviour};
 
     #[derive(Debug)]
     pub struct Text {
@@ -154,23 +183,26 @@ mod text {
             wrap: Option<cosmic_text::Wrap>,
             font: Option<&'static str>,
             size: Option<f32>,
-        ) -> Self {
+        ) -> Element {
             let size = size.unwrap_or(25.);
             let attrs = Attrs::new()
                 .color(color.unwrap_or_default().into())
                 .family(cosmic_text::Family::Name(font.unwrap_or("JetBrains Mono")));
 
-            Self {
-                unused_text: Some(vec![(text.into(), AttrsList::new(attrs))]),
-                buffer: Buffer::new_empty(Metrics::new(size, size)),
-                wrap: wrap.unwrap_or(cosmic_text::Wrap::Word),
+            Element {
+                el: super::MountableElement::Text(Self {
+                    unused_text: Some(vec![(text.into(), AttrsList::new(attrs))]),
+                    buffer: Buffer::new_empty(Metrics::new(size, size)),
+                    wrap: wrap.unwrap_or(cosmic_text::Wrap::Word),
+                }),
+                children: None,
             }
         }
     }
 
-    impl From<Text> for Element {
+    impl From<Text> for ElementOrPath {
         fn from(value: Text) -> Self {
-            Element::no_children(value.into())
+            ElementOrPath::Element(Element::no_children(value.into()))
         }
     }
 
@@ -221,16 +253,24 @@ mod text {
                 );
             }
         }
+
+        fn needs_rebuild(&self, new: &Self) -> bool {
+            let Some(unused_text) = &new.unused_text else {
+                panic!("Rebuild with built text??")
+            };
+
+            // Todo needs more
+            self.buffer
+                .lines
+                .iter()
+                .map(|it| it.text())
+                .eq(unused_text.iter().map(|it| &it.0))
+        }
     }
 }
 
 mod stack {
     use super::{ChildView, Element, MountedElementBehaviour};
-
-    #[derive(Debug)]
-    pub struct HStackDescriptor {
-        tuple: Vec<Element>,
-    }
 
     #[derive(Debug)]
     pub struct HStack;
@@ -239,42 +279,47 @@ mod stack {
         fn style(&self) -> super::Style {
             super::Style::default().with_direction(taffy::FlexDirection::Row)
         }
-    }
 
-    pub fn hstack<F>(child: impl ChildView<F>) -> HStackDescriptor {
-        HStackDescriptor {
-            tuple: child.to_element_vec(),
+        fn needs_rebuild(&self, new: &Self) -> bool {
+            // actually this needs to check children? what does this mean?
+            false
         }
     }
 
-    impl From<HStackDescriptor> for Element {
-        fn from(value: HStackDescriptor) -> Self {
-            Element {
-                el: HStack.into(),
-                children: Some(value.tuple),
-            }
+    pub fn hstack<F>(child: impl ChildView<F>) -> Element {
+        Element {
+            el: HStack.into(),
+            children: Some(child.to_element_vec()),
         }
+    }
+}
+
+impl From<Element> for ElementOrPath {
+    fn from(value: Element) -> Self {
+        ElementOrPath::Element(value)
     }
 }
 
 pub trait ChildView<F> {
-    fn to_element_vec(self) -> Vec<Element>;
+    fn to_element_vec(self) -> Vec<ElementOrPath>;
 }
 
-impl<A: Into<Element>> ChildView<(A,)> for A {
-    fn to_element_vec(self) -> Vec<Element> {
+impl<A: Into<ElementOrPath>> ChildView<(A,)> for A {
+    fn to_element_vec(self) -> Vec<ElementOrPath> {
         vec![self.into()]
     }
 }
 
-impl<A: Into<Element>, B: Into<Element>> ChildView<(A, B)> for (A, B) {
-    fn to_element_vec(self) -> Vec<Element> {
+impl<A: Into<ElementOrPath>, B: Into<ElementOrPath>> ChildView<(A, B)> for (A, B) {
+    fn to_element_vec(self) -> Vec<ElementOrPath> {
         vec![self.0.into(), self.1.into()]
     }
 }
 
-impl<A: Into<Element>, B: Into<Element>, C: Into<Element>> ChildView<(A, B, C)> for (A, B, C) {
-    fn to_element_vec(self) -> Vec<Element> {
+impl<A: Into<ElementOrPath>, B: Into<ElementOrPath>, C: Into<ElementOrPath>> ChildView<(A, B, C)>
+    for (A, B, C)
+{
+    fn to_element_vec(self) -> Vec<ElementOrPath> {
         vec![self.0.into(), self.1.into(), self.2.into()]
     }
 }
