@@ -26,6 +26,7 @@ impl View for MyView {
     }
 
     fn messages(&mut self) {
+        return;
         while let Some(message) = self.messages.recv() {
             match message {
                 MySecondViewMessage::Clicked => {
@@ -55,6 +56,7 @@ impl View for MySecondView {
     }
 
     fn messages(&mut self) {
+        return;
         while let Some(message) = self.messages.recv() {
             match message {
                 MySecondViewMessage::Clicked => {

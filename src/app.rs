@@ -16,10 +16,10 @@ pub struct App<V> {
     tree: ElementTree,
     registry: TypeRegistry,
     view: V,
-    view_created_element: HashMap<ViewId, NodeId>,
+    view_data: ViewMetaData,
 }
 
-#[derive(Debug, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ViewId(ParsedPath);
 
 #[derive(Debug)]
@@ -33,15 +33,15 @@ impl<V: View + GetTypeRegistration + GetPath> App<V> {
 
         type_registry.register::<V>();
 
-        let mut view_created_element = Default::default();
+        let mut view_data = Default::default();
 
-        let tree = ElementTree::create(&type_registry, &view, &mut view_created_element);
+        let tree = ElementTree::create(&type_registry, &view, &mut view_data);
 
         Self {
             registry: type_registry,
             tree,
             view,
-            view_created_element,
+            view_data,
         }
     }
 }
@@ -67,7 +67,7 @@ impl<V: View> App<V> {
         iter_views(&self.registry, &mut self.view, &mut |view, reg, access| {
             let mut is_dirty = false;
 
-            iter_fields(view.as_reflect_mut(), |path, field| {
+            iter_fields(view.as_reflect_mut(), |_, field| {
                 if let Some(reflect_state) = reg.get_type_data::<ReflectState>(field.type_id()) {
                     let Some(state) = reflect_state.get(field) else {
                         return;
@@ -79,43 +79,22 @@ impl<V: View> App<V> {
 
             if is_dirty {
                 dirty_views.push(ViewId(access.clone().into()));
-
-                // let root = self
-                //     .taffy
-                //     .new_leaf(taffy::Style {
-                //         size: taffy::Size {
-                //             width: length(800 as f32),
-                //             height: length(600 as f32),
-                //         },
-                //         ..Default::default()
-                //     })
-                //     .unwrap();
-
-                // self.root = root;
-
-                // mount_elements(&mut self.taffy, self.root, build, &mut |id, item| {
-                //     self.elements.insert(id, item);
-                // });
             }
         });
 
         for dirty in dirty_views {
             let view = self.view.reflect_path_mut(&dirty.0).unwrap();
-            let reflect_view = self
-                .registry
-                .get_type_data::<ReflectView>(view.type_id())
-                .unwrap();
 
-            let view = reflect_view.get_mut(view).unwrap();
+            let view = reflect_view_mut_or_panic(&self.registry, view);
 
             view.messages();
 
             self.tree.modify_if_necessary(
                 &self.registry,
                 &self.view,
-                self.view_created_element[&dirty],
-                dirty.0 .0.iter().map(|it| it.access.clone()).collect(),
-                &mut self.view_created_element,
+                self.view_data.element_created_by_view(&dirty),
+                dirty,
+                &mut self.view_data,
             );
         }
     }
@@ -282,70 +261,71 @@ fn iter_fields(of: &mut dyn Reflect, mut f: impl FnMut(&str, &mut dyn Reflect)) 
 }
 
 fn mount_children<V: View + Reflect + GetPath>(
-    taffy: &mut TaffyTree,
+    tree: &mut ElementTree,
     reg: &TypeRegistry,
     parent: NodeId,
-    root_item: &V,
+    root_view: &V,
     element: Element,
-    first_item: bool,
-    paths: &mut Vec<Access<'static>>,
-    elements: &mut HashMap<NodeId, MountableElement>,
-    view_created_element: &mut HashMap<ViewId, NodeId>,
+    first_child_of_view: bool,
+    view: &mut ViewId,
+    view_data: &mut ViewMetaData,
 ) {
     let Element { el, children } = element;
 
-    let id = taffy.new_leaf(el.style().0).unwrap();
-    taffy.add_child(parent, id).unwrap();
+    let id = tree.insert(el, parent);
 
-    elements.insert(id, el);
-
-    if first_item {
-        view_created_element.insert(ViewId(paths.clone().into()), id);
+    if first_child_of_view {
+        view_data.create_with_first_child(view.clone(), id);
+    } else {
+        view_data.add_child(view.clone(), id);
     }
 
     if let Some(children) = children {
         for child in children {
             match child {
-                crate::ElementOrPath::Element(element) => mount_children(
-                    taffy,
-                    reg,
-                    id,
-                    root_item,
-                    element,
-                    false,
-                    paths,
-                    elements,
-                    view_created_element,
-                ),
-                crate::ElementOrPath::Path(path) => {
-                    paths.extend(path.0.into_iter().map(|it| it.access));
+                crate::ElementOrPath::Element(element) => {
+                    mount_children(tree, reg, id, root_view, element, false, view, view_data)
+                }
+                crate::ElementOrPath::Path(access) => {
+                    view.0 .0.extend(access.0);
 
-                    let field = root_item
-                        .reflect_path(&ParsedPath::from(paths.clone()))
-                        .unwrap();
+                    let field = {
+                        let mut temp_vec = vec![];
 
-                    if let Some(reflect_view) = reg.get_type_data::<ReflectView>(field.type_id()) {
-                        let Some(view) = reflect_view.get(field) else {
-                            panic!("None view path");
-                        };
+                        std::mem::swap(&mut temp_vec, &mut view.0 .0);
 
-                        mount_children(
-                            taffy,
-                            reg,
-                            id,
-                            root_item,
-                            view.build(),
-                            true,
-                            paths,
-                            elements,
-                            view_created_element,
-                        );
-                    }
+                        let mut temp = ParsedPath(temp_vec);
+                        let field = root_view.reflect_path(&temp).unwrap();
+
+                        std::mem::swap(&mut view.0 .0, &mut temp.0);
+
+                        field
+                    };
+
+                    let element = reflect_view_or_panic(reg, field).build();
+
+                    mount_children(tree, reg, id, root_view, element, true, view, view_data);
                 }
             }
-            // mount_elements(taffy, id, child, store_element);
         }
     }
+}
+
+fn reflect_view_or_panic<'a>(registry: &TypeRegistry, view: &'a dyn Reflect) -> &'a dyn View {
+    let reflect_view = registry
+        .get_type_data::<ReflectView>(view.type_id())
+        .unwrap();
+    reflect_view.get(view).unwrap()
+}
+
+fn reflect_view_mut_or_panic<'a>(
+    registry: &TypeRegistry,
+    view: &'a mut dyn Reflect,
+) -> &'a mut dyn View {
+    let reflect_view = registry
+        .get_type_data::<ReflectView>(view.type_id())
+        .unwrap();
+    reflect_view.get_mut(view).unwrap()
 }
 
 struct ElementTree {
@@ -359,10 +339,10 @@ impl ElementTree {
     pub fn create<V: View>(
         reg: &TypeRegistry,
         root_item: &V,
-        view_created_element: &mut HashMap<ViewId, NodeId>,
+        view_data: &mut ViewMetaData,
     ) -> Self {
         let mut taffy = TaffyTree::default();
-        let mut elements = HashMap::default();
+        let elements = HashMap::default();
 
         let root = taffy
             .new_leaf(taffy::Style {
@@ -374,23 +354,33 @@ impl ElementTree {
             })
             .unwrap();
 
+        let mut this = Self {
+            taffy,
+            elements,
+            root,
+        };
+
         mount_children(
-            &mut taffy,
+            &mut this,
             reg,
             root,
             root_item,
             root_item.build(),
             true,
-            &mut vec![],
-            &mut elements,
-            view_created_element,
+            &mut ViewId(ParsedPath(Vec::new())),
+            view_data,
         );
 
-        Self {
-            taffy,
-            elements,
-            root,
-        }
+        this
+    }
+
+    pub fn insert(&mut self, element: MountableElement, parent: NodeId) -> NodeId {
+        let id = self.taffy.new_leaf(element.style().0).unwrap();
+        self.taffy.add_child(parent, id).unwrap();
+
+        self.elements.insert(id, element);
+
+        id
     }
 
     pub fn modify_if_necessary<V: View>(
@@ -398,11 +388,11 @@ impl ElementTree {
         reg: &TypeRegistry,
         root_item: &V,
         from: NodeId,
-        mut paths: Vec<Access<'static>>,
-        created_by: &mut HashMap<ViewId, NodeId>,
+        mut view_id: ViewId,
+        view_meta_data: &mut ViewMetaData,
     ) {
         let mut taffy = TaffyTree::default();
-        let mut elements = HashMap::default();
+        let elements = HashMap::default();
 
         let root = taffy
             .new_leaf(taffy::Style {
@@ -414,35 +404,34 @@ impl ElementTree {
             })
             .unwrap();
 
-        let mut new_created_by = HashMap::new();
+        let mut new_meta_data = ViewMetaData::new();
 
-        let item = root_item
-            .reflect_path(&ParsedPath::from(paths.clone()))
-            .unwrap();
+        let item = root_item.reflect_path(&view_id.0).unwrap();
 
         let reflect_view = reg.get_type_data::<ReflectView>(item.type_id()).unwrap();
         let view = reflect_view.get(item).unwrap();
 
-        mount_children(
-            &mut taffy,
-            reg,
-            root,
-            root_item,
-            view.build(),
-            true,
-            &mut paths,
-            &mut elements,
-            &mut new_created_by,
-        );
-
-        let new = Self {
+        let mut new = Self {
             taffy,
             elements,
             root,
         };
 
+        mount_children(
+            &mut new,
+            reg,
+            root,
+            root_item,
+            view.build(),
+            true,
+            &mut view_id,
+            &mut new_meta_data,
+        );
+
         if !self.eq(from, &new) {
-            self.mount(from, new, created_by, new_created_by);
+            self.mount(from, new, view_meta_data, new_meta_data);
+        } else {
+            dbg!("EQQQQ");
         }
     }
 
@@ -469,6 +458,7 @@ impl ElementTree {
             let other_element = &other.elements[&other_node];
 
             if element.needs_rebuild(other_element) {
+                dbg!(element, other_element);
                 return false;
             }
         }
@@ -480,8 +470,8 @@ impl ElementTree {
         &mut self,
         from: NodeId,
         other: ElementTree,
-        real_created_by: &mut HashMap<ViewId, NodeId>,
-        new_created_by: HashMap<ViewId, NodeId>,
+        real_meta_data: &mut ViewMetaData,
+        new_meta_data: ViewMetaData,
     ) {
         let to_delete = iter_elements(&self.taffy, from)
             .map(|it| it.1)
@@ -490,15 +480,7 @@ impl ElementTree {
         for to_delete in to_delete {
             self.taffy.remove(to_delete).unwrap();
             self.elements.remove(&to_delete).unwrap();
-
-            // wow bad o n2
-            if let Some(key) = real_created_by
-                .iter()
-                .find(|it| *it.1 == to_delete)
-                .map(|it| it.0 .0.clone())
-            {
-                real_created_by.remove(&ViewId(key));
-            }
+            real_meta_data.remove_element(to_delete);
         }
 
         let ElementTree {
@@ -508,20 +490,78 @@ impl ElementTree {
         } = other;
 
         let mut old_to_new: HashMap<NodeId, NodeId> = Default::default();
+
         old_to_new.insert(root, from);
 
         for (old_parent, to_create) in iter_elements(&taffy, root) {
             let element = elements.remove(&to_create).unwrap();
-            let style = taffy.style(to_create).unwrap().clone();
-            let new = self.taffy.new_leaf(style).unwrap();
+            let new = self.taffy.new_leaf(element.style().0).unwrap();
+
             old_to_new.insert(to_create, new);
-            self.elements.insert(new, element);
+
             let parent = old_to_new[&old_parent];
+
+            self.elements.insert(new, element);
             self.taffy.add_child(parent, new).unwrap();
         }
 
-        for new in new_created_by {
-            real_created_by.insert(new.0, old_to_new[&new.1]);
+        real_meta_data.copy(new_meta_data, old_to_new);
+    }
+}
+
+#[derive(Default)]
+pub struct ViewMetaData {
+    view_to_element: HashMap<ViewId, NodeId>,
+    element_to_view: HashMap<NodeId, ViewId>,
+}
+
+impl ViewMetaData {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn create_with_first_child(&mut self, mut id: ViewId, element_id: NodeId) {
+        // Ensure keys map correctly
+        for offset_access in &mut id.0 .0 {
+            offset_access.offset = None;
         }
+
+        self.view_to_element.insert(id.clone(), element_id);
+        self.element_to_view.insert(element_id, id);
+    }
+
+    pub fn add_child(&mut self, mut parent: ViewId, element_id: NodeId) {
+        // Ensure keys map correctly
+        for offset_access in &mut parent.0 .0 {
+            offset_access.offset = None;
+        }
+        self.element_to_view.insert(element_id, parent);
+    }
+
+    pub fn element_created_by_view(&self, id: &ViewId) -> NodeId {
+        self.view_to_element[id]
+    }
+
+    pub fn remove_element(&mut self, element_id: NodeId) {
+        let Some(key) = self.element_to_view.remove(&element_id) else {
+            return;
+        };
+
+        self.view_to_element.remove(&key);
+    }
+
+    pub fn copy(&mut self, other: ViewMetaData, node_mapping: HashMap<NodeId, NodeId>) {
+        self.view_to_element.extend(
+            other
+                .view_to_element
+                .into_iter()
+                .map(|(k, v)| (k, node_mapping[&v])),
+        );
+        self.element_to_view.extend(
+            other
+                .element_to_view
+                .into_iter()
+                .map(|(k, v)| (node_mapping[&k], v)),
+        );
     }
 }

@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use bevy_reflect::ParsedPath;
+use bevy_reflect::{Access, ParsedPath};
 pub use button::*;
 pub use stack::HStack;
 pub use stack::*;
@@ -45,16 +45,25 @@ impl MountableElement {
     }
 }
 
-// impl<T: View> From<&T> for Element {
-//     fn from(value: &T) -> Self {
-//         value.build()
-//     }
-// }
-
 #[derive(Debug)]
 pub enum ElementOrPath {
     Element(Element),
     Path(ParsedPath),
+}
+
+impl From<ParsedPath> for ElementOrPath {
+    fn from(value: ParsedPath) -> Self {
+        ElementOrPath::Path(value)
+    }
+}
+
+impl From<ParsedPath> for Element {
+    fn from(value: ParsedPath) -> Self {
+        Element {
+            el: HStack.into(),
+            children: Some(vec![ElementOrPath::Path(value)]),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -260,11 +269,17 @@ mod text {
             };
 
             // Todo needs more
-            self.buffer
+            !self
+                .buffer
                 .lines
                 .iter()
                 .map(|it| it.text())
-                .eq(unused_text.iter().map(|it| &it.0))
+                .inspect(|it| {
+                    dbg!(&it);
+                })
+                .eq(unused_text.iter().map(|it| &it.0).inspect(|it| {
+                    dbg!(&it);
+                }))
         }
     }
 }

@@ -263,18 +263,3 @@ macro_rules! view {
         .unwrap()
     }};
 }
-
-impl From<ParsedPath> for ElementOrPath {
-    fn from(value: ParsedPath) -> Self {
-        ElementOrPath::Path(value)
-    }
-}
-
-impl From<ParsedPath> for Element {
-    fn from(value: ParsedPath) -> Self {
-        Element {
-            el: HStack.into(),
-            children: Some(vec![ElementOrPath::Path(value)]),
-        }
-    }
-}

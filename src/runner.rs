@@ -105,7 +105,8 @@ impl Runner {
                         } => {
                             let now = Instant::now();
                             app.event(AppEvent::Clicked(mouse_pos.x, mouse_pos.y));
-                            dbg!(now.elapsed());
+                            let elapsed = now.elapsed();
+                            dbg!(elapsed);
                             // warn!("Unused mouse input");
 
                             // let window = &windows[&window_id];
