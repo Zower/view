@@ -4,7 +4,7 @@ use std::{
 };
 
 use bevy_reflect::{Access, GetPath, GetTypeRegistration, ParsedPath, Reflect, TypeRegistry};
-use taffy::{prelude::length, NodeId, Size, TaffyTree};
+use taffy::{prelude::length, NodeId, PrintTree, Size, TaffyTree};
 use winit::dpi::PhysicalSize;
 
 use crate::{
@@ -52,8 +52,18 @@ impl<V: View> App<V> {
             AppEvent::Clicked(x, y) => {
                 for (_, node) in iter_elements(&self.tree.taffy, self.tree.root) {
                     let el = self.tree.elements.get_mut(&node).unwrap();
+                    let layout: Layout = self.tree.taffy.layout(node).unwrap().clone().into();
+                    let MountableElement::Button(_) = el else {
+                        continue;
+                    };
 
-                    el.event(crate::ElementEvent::Click(x, y));
+                    if layout.location.x < x
+                        && layout.location.y < y
+                        && x < layout.location.x + layout.size.width
+                        && y < layout.location.y + layout.size.height
+                    {
+                        el.event(crate::ElementEvent::Click(x, y));
+                    }
                 }
             }
         }
@@ -72,6 +82,10 @@ impl<V: View> App<V> {
                     let Some(state) = reflect_state.get(field) else {
                         return;
                     };
+
+                    if state.is_dirty() {
+                        dbg!(&field);
+                    }
 
                     is_dirty = is_dirty || state.is_dirty();
                 }
@@ -234,14 +248,15 @@ fn iter_fields(of: &mut dyn Reflect, mut f: impl FnMut(&str, &mut dyn Reflect)) 
             }
         }
         bevy_reflect::ReflectMut::Enum(e) => {
-            panic!();
-            // let mut index = 0;
+            let mut index = 0;
 
-            // while let Some(item) = e.field_at_mut(index) {
-            //     index += 1;
+            while let Some(item) = e.field_at_mut(index) {
+                let str = format!(".{}", index);
 
-            //     f(item)
-            // }
+                index += 1;
+
+                f(&str, item)
+            }
         }
         bevy_reflect::ReflectMut::TupleStruct(ts) => {
             let mut index = 0;
@@ -295,6 +310,7 @@ fn mount_children<V: View + Reflect + GetPath>(
                         std::mem::swap(&mut temp_vec, &mut view.0 .0);
 
                         let mut temp = ParsedPath(temp_vec);
+                        dbg!(&temp);
                         let field = root_view.reflect_path(&temp).unwrap();
 
                         std::mem::swap(&mut view.0 .0, &mut temp.0);
@@ -391,6 +407,7 @@ impl ElementTree {
         mut view_id: ViewId,
         view_meta_data: &mut ViewMetaData,
     ) {
+        dbg!(self.taffy.total_node_count());
         let mut taffy = TaffyTree::default();
         let elements = HashMap::default();
 
@@ -408,8 +425,7 @@ impl ElementTree {
 
         let item = root_item.reflect_path(&view_id.0).unwrap();
 
-        let reflect_view = reg.get_type_data::<ReflectView>(item.type_id()).unwrap();
-        let view = reflect_view.get(item).unwrap();
+        let view = reflect_view_or_panic(reg, item);
 
         let mut new = Self {
             taffy,
@@ -430,8 +446,6 @@ impl ElementTree {
 
         if !self.eq(from, &new) {
             self.mount(from, new, view_meta_data, new_meta_data);
-        } else {
-            dbg!("EQQQQ");
         }
     }
 
@@ -458,12 +472,17 @@ impl ElementTree {
             let other_element = &other.elements[&other_node];
 
             if element.needs_rebuild(other_element) {
-                dbg!(element, other_element);
                 return false;
             }
         }
 
         true
+    }
+
+    fn remove_node(&mut self, node: NodeId, meta_data: &mut ViewMetaData) {
+        self.elements.remove(&node).unwrap();
+        let _ = self.taffy.remove(node);
+        meta_data.remove_element(node);
     }
 
     fn mount(
@@ -478,9 +497,7 @@ impl ElementTree {
             .collect::<Vec<_>>();
 
         for to_delete in to_delete {
-            self.taffy.remove(to_delete).unwrap();
-            self.elements.remove(&to_delete).unwrap();
-            real_meta_data.remove_element(to_delete);
+            self.remove_node(to_delete, real_meta_data);
         }
 
         let ElementTree {
@@ -491,9 +508,10 @@ impl ElementTree {
 
         let mut old_to_new: HashMap<NodeId, NodeId> = Default::default();
 
-        old_to_new.insert(root, from);
+        let other_real_root = taffy.child_at_index(root, 0).unwrap();
+        old_to_new.insert(other_real_root, from);
 
-        for (old_parent, to_create) in iter_elements(&taffy, root) {
+        for (old_parent, to_create) in iter_elements(&taffy, other_real_root) {
             let element = elements.remove(&to_create).unwrap();
             let new = self.taffy.new_leaf(element.style().0).unwrap();
 

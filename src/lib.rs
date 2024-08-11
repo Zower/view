@@ -79,7 +79,7 @@ pub trait State {
     fn is_dirty(&self) -> bool;
 }
 
-#[derive(Reflect, Debug)]
+#[derive(Reflect, Debug, Clone)]
 #[reflect(State)]
 pub struct Messages<M> {
     #[reflect(ignore)]
@@ -100,7 +100,7 @@ impl<M> Default for Messages<M> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MessageInner<M> {
     rx: crossbeam::channel::Receiver<M>,
     tx: crossbeam::channel::Sender<M>,
