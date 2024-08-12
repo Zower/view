@@ -1,16 +1,18 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
-use bevy_reflect::{Access, ParsedPath};
 pub use button::*;
 pub use stack::HStack;
 pub use stack::*;
 use taffy::prelude::auto;
 pub use text::*;
 
-use crate::Canvas;
+use crate::{Canvas, View};
 
 #[enum_delegate::register]
-pub trait MountedElementBehaviour {
+pub(crate) trait MountedElementBehaviour {
     #[allow(unused_variables)]
     fn event(&mut self, event: ElementEvent) {}
 
@@ -24,7 +26,40 @@ pub trait MountedElementBehaviour {
     #[allow(unused_variables)]
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
 
-    fn needs_rebuild(&self, new: &Self) -> bool;
+    fn try_rebuild(&mut self, new: Self) -> RebuildResult<Self>
+    where
+        Self: Sized;
+}
+
+pub(crate) enum RebuildResult<T> {
+    Rebuilt,
+    Replace(T),
+}
+
+impl<T> RebuildResult<T> {
+    pub fn map<U>(self, f: impl Fn(T) -> U) -> RebuildResult<U> {
+        match self {
+            RebuildResult::Rebuilt => RebuildResult::Rebuilt,
+            RebuildResult::Replace(t) => RebuildResult::Replace(f(t)),
+        }
+    }
+}
+
+pub struct ViewElement(pub(crate) Box<dyn View>);
+
+impl MountedElementBehaviour for ViewElement {
+    fn try_rebuild(&mut self, new: Self) -> RebuildResult<Self>
+    where
+        Self: Sized,
+    {
+        if self.0.type_id() != new.0.type_id() {
+            return RebuildResult::Replace(new);
+        }
+
+        self.0.apply(new.0.as_reflect());
+
+        RebuildResult::Rebuilt
+    }
 }
 
 #[derive(Debug)]
@@ -33,48 +68,28 @@ pub(crate) enum MountableElement {
     Button(Button),
     Text(Text),
     HStack(HStack),
-}
-
-impl MountableElement {
-    pub(crate) fn kind(&self) -> &'static str {
-        match self {
-            MountableElement::Button(_) => "button",
-            MountableElement::Text(_) => "text",
-            MountableElement::HStack(_) => "hstack",
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum ElementOrPath {
-    Element(Element),
-    Path(ParsedPath),
-}
-
-impl From<ParsedPath> for ElementOrPath {
-    fn from(value: ParsedPath) -> Self {
-        ElementOrPath::Path(value)
-    }
-}
-
-impl From<ParsedPath> for Element {
-    fn from(value: ParsedPath) -> Self {
-        Element {
-            el: HStack.into(),
-            children: Some(vec![ElementOrPath::Path(value)]),
-        }
-    }
+    View(ViewElement),
 }
 
 #[derive(Debug)]
 pub struct Element {
     pub(crate) el: MountableElement,
-    pub(crate) children: Option<Vec<ElementOrPath>>,
+    pub(crate) children: Option<Vec<Element>>,
 }
 
 impl Element {
     pub(crate) fn no_children(el: MountableElement) -> Self {
         Self { el, children: None }
+    }
+}
+
+impl<V: View> From<V> for Element {
+    fn from(value: V) -> Self {
+        let child = value.build();
+        Element {
+            el: MountableElement::View(ViewElement(Box::new(value))),
+            children: Some(vec![child]),
+        }
     }
 }
 
@@ -112,7 +127,7 @@ mod button {
 
     use crate::{Color, Layout, Triggerable};
 
-    use super::{Element, ElementEvent, ElementOrPath, MountedElementBehaviour};
+    use super::{Element, ElementEvent, MountedElementBehaviour, RebuildResult};
 
     #[builder]
     pub struct Button {
@@ -125,9 +140,9 @@ mod button {
         }
     }
 
-    impl From<Button> for ElementOrPath {
+    impl From<Button> for Element {
         fn from(value: Button) -> Self {
-            ElementOrPath::Element(Element::no_children(value.into()))
+            Element::no_children(value.into())
         }
     }
 
@@ -160,8 +175,13 @@ mod button {
             );
         }
 
-        fn needs_rebuild(&self, new: &Self) -> bool {
-            true
+        fn try_rebuild(&mut self, new: Self) -> RebuildResult<Self>
+        where
+            Self: Sized,
+        {
+            self.on_click = new.on_click;
+
+            RebuildResult::Rebuilt
         }
     }
 
@@ -174,7 +194,7 @@ mod text {
     use bon::bon;
     use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, Metrics};
 
-    use super::{Element, ElementOrPath, MountedElementBehaviour};
+    use super::{Element, MountedElementBehaviour, RebuildResult};
 
     #[derive(Debug)]
     pub struct Text {
@@ -209,9 +229,9 @@ mod text {
         }
     }
 
-    impl From<Text> for ElementOrPath {
+    impl From<Text> for Element {
         fn from(value: Text) -> Self {
-            ElementOrPath::Element(Element::no_children(value.into()))
+            Element::no_children(value.into())
         }
     }
 
@@ -263,29 +283,20 @@ mod text {
             }
         }
 
-        fn needs_rebuild(&self, new: &Self) -> bool {
-            let Some(unused_text) = &new.unused_text else {
-                panic!("Rebuild with built text??")
-            };
+        fn try_rebuild(&mut self, new: Self) -> RebuildResult<Self>
+        where
+            Self: Sized,
+        {
+            self.unused_text = new.unused_text;
+            self.wrap = new.wrap;
 
-            // Todo needs more
-            !self
-                .buffer
-                .lines
-                .iter()
-                .map(|it| it.text())
-                .inspect(|it| {
-                    dbg!(&it);
-                })
-                .eq(unused_text.iter().map(|it| &it.0).inspect(|it| {
-                    dbg!(&it);
-                }))
+            RebuildResult::Rebuilt
         }
     }
 }
 
 mod stack {
-    use super::{ChildView, Element, MountedElementBehaviour};
+    use super::{ChildView, Element, MountedElementBehaviour, RebuildResult};
 
     #[derive(Debug)]
     pub struct HStack;
@@ -295,9 +306,11 @@ mod stack {
             super::Style::default().with_direction(taffy::FlexDirection::Row)
         }
 
-        fn needs_rebuild(&self, new: &Self) -> bool {
-            // actually this needs to check children? what does this mean?
-            false
+        fn try_rebuild(&mut self, _: Self) -> RebuildResult<Self>
+        where
+            Self: Sized,
+        {
+            RebuildResult::Rebuilt
         }
     }
 
@@ -309,32 +322,30 @@ mod stack {
     }
 }
 
-impl From<Element> for ElementOrPath {
-    fn from(value: Element) -> Self {
-        ElementOrPath::Element(value)
-    }
-}
-
 pub trait ChildView<F> {
-    fn to_element_vec(self) -> Vec<ElementOrPath>;
+    fn to_element_vec(self) -> Vec<Element>;
 }
 
-impl<A: Into<ElementOrPath>> ChildView<(A,)> for A {
-    fn to_element_vec(self) -> Vec<ElementOrPath> {
+impl<A: Into<Element>> ChildView<(A,)> for A {
+    fn to_element_vec(self) -> Vec<Element> {
         vec![self.into()]
     }
 }
 
-impl<A: Into<ElementOrPath>, B: Into<ElementOrPath>> ChildView<(A, B)> for (A, B) {
-    fn to_element_vec(self) -> Vec<ElementOrPath> {
+impl<A: Into<Element>> ChildView<(A,)> for (A,) {
+    fn to_element_vec(self) -> Vec<Element> {
+        vec![self.0.into()]
+    }
+}
+
+impl<A: Into<Element>, B: Into<Element>> ChildView<(A, B)> for (A, B) {
+    fn to_element_vec(self) -> Vec<Element> {
         vec![self.0.into(), self.1.into()]
     }
 }
 
-impl<A: Into<ElementOrPath>, B: Into<ElementOrPath>, C: Into<ElementOrPath>> ChildView<(A, B, C)>
-    for (A, B, C)
-{
-    fn to_element_vec(self) -> Vec<ElementOrPath> {
+impl<A: Into<Element>, B: Into<Element>, C: Into<Element>> ChildView<(A, B, C)> for (A, B, C) {
+    fn to_element_vec(self) -> Vec<Element> {
         vec![self.0.into(), self.1.into(), self.2.into()]
     }
 }
@@ -350,5 +361,34 @@ impl Deref for Style {
 impl DerefMut for Style {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl Debug for ViewElement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ViewElement")
+            .field(&self.0.as_reflect())
+            .finish()
+    }
+}
+
+impl From<RebuildResult<Button>> for RebuildResult<MountableElement> {
+    fn from(value: RebuildResult<Button>) -> Self {
+        value.map(Into::into)
+    }
+}
+impl From<RebuildResult<Text>> for RebuildResult<MountableElement> {
+    fn from(value: RebuildResult<Text>) -> Self {
+        value.map(Into::into)
+    }
+}
+impl From<RebuildResult<HStack>> for RebuildResult<MountableElement> {
+    fn from(value: RebuildResult<HStack>) -> Self {
+        value.map(Into::into)
+    }
+}
+impl From<RebuildResult<ViewElement>> for RebuildResult<MountableElement> {
+    fn from(value: RebuildResult<ViewElement>) -> Self {
+        value.map(Into::into)
     }
 }

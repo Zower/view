@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use app::App;
-use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, ParsedPath, Reflect};
+use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, Reflect};
 
 mod app;
 mod elements;
@@ -46,6 +46,7 @@ pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
 #[reflect_trait]
 pub trait View: Reflect {
     fn build(&self) -> Element;
+
     fn messages(&mut self) {}
 }
 
@@ -247,19 +248,12 @@ impl From<Color> for femtovg::Color {
     }
 }
 
-#[macro_export]
-macro_rules! view {
-    ($view:expr) => {{
-        fn assert_view<V: View>(v: &V) {}
+pub trait IntoElement {
+    fn element(self) -> Element;
+}
 
-        let _ = &$view;
-        assert_view($view);
-
-        ::bevy_reflect::ParsedPath::parse_static(::const_format::str_replace!(
-            stringify!($view),
-            "&self",
-            ""
-        ))
-        .unwrap()
-    }};
+impl<T: Into<Element>> IntoElement for T {
+    fn element(self) -> Element {
+        self.into()
+    }
 }

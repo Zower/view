@@ -1,10 +1,8 @@
-use bevy_reflect::{ParsedPath, Reflect};
-use view::{hstack, run, view, Button, Element, Messages, ReflectView, Text, View};
+use bevy_reflect::Reflect;
+use view::{hstack, run, Button, Element, IntoElement, Messages, ReflectView, Text, View};
 
 fn main() -> view::Result<()> {
     run(MyView {
-        // second: MySecondView::default(),
-        second: AnotherView::False(Messages::default(), MySecondView::default()),
         messages: Messages::default(),
     })
 }
@@ -17,35 +15,34 @@ enum MySecondViewMessage {
 #[derive(Reflect)]
 #[reflect(View)]
 struct MyView {
-    second: AnotherView,
     // second: MySecondView,
     messages: Messages<MySecondViewMessage>,
 }
 
 impl View for MyView {
     fn build(&self) -> Element {
-        view!(&self.second).into()
+        AnotherView::True(Messages::default()).into()
     }
 }
 
 #[derive(Reflect)]
 #[reflect(View)]
 enum AnotherView {
-    False(Messages<MySecondViewMessage>, MySecondView),
-    True(PlusOne, Messages<MySecondViewMessage>),
+    False(Messages<MySecondViewMessage>),
+    True(Messages<MySecondViewMessage>),
 }
 
 impl View for AnotherView {
     fn build(&self) -> Element {
         let messages = match self {
-            AnotherView::False(m, _) => m,
-            AnotherView::True(_, m) => m,
+            AnotherView::False(m) => m,
+            AnotherView::True(m) => m,
         };
 
         hstack((
             match self {
-                AnotherView::False(poo, _) => ParsedPath::parse_static(".1").unwrap(),
-                AnotherView::True(poo, _) => ParsedPath::parse_static(".0").unwrap(),
+                AnotherView::False(_) => PlusOne(0).element(),
+                AnotherView::True(_) => MySecondView::default().element(),
             },
             Button::on_click(messages.send(MySecondViewMessage::Clicked)),
         ))
@@ -53,25 +50,25 @@ impl View for AnotherView {
 
     fn messages(&mut self) {
         let messages = match self {
-            AnotherView::False(m, _) => m,
-            AnotherView::True(_, m) => m,
+            AnotherView::False(m) => m,
+            AnotherView::True(m) => m,
         };
 
         let mut to_modify = false;
 
-        while let Some(_) = messages.recv() {
+        while let Some(msg) = messages.recv() {
             to_modify = true;
         }
+
+        return;
 
         if !to_modify {
             return;
         }
 
         *self = match self {
-            AnotherView::False(messages, _) => AnotherView::True(PlusOne(0), messages.clone()),
-            AnotherView::True(_, messages) => {
-                AnotherView::False(messages.clone(), MySecondView::default())
-            }
+            AnotherView::False(messages) => AnotherView::True(messages.clone()),
+            AnotherView::True(messages) => AnotherView::False(messages.clone()),
         }
     }
 }
@@ -79,7 +76,6 @@ impl View for AnotherView {
 #[reflect(View)]
 struct MySecondView {
     messages: Messages<MySecondViewMessage>,
-    view: PlusOne,
     data: u64,
 }
 
@@ -88,7 +84,7 @@ impl View for MySecondView {
         hstack((
             Text::builder().text("Hey from second!").build(),
             Button::on_click(self.messages.send(MySecondViewMessage::Clicked)),
-            view!(&self.view),
+            PlusOne(self.data + 1),
         ))
     }
 
@@ -97,7 +93,6 @@ impl View for MySecondView {
             match message {
                 MySecondViewMessage::Clicked => {
                     self.data += 1;
-                    self.view.0 = self.data + 1;
                 }
             }
         }
