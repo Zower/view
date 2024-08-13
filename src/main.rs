@@ -28,20 +28,20 @@ impl View for MyView {
 #[derive(Reflect)]
 #[reflect(View)]
 enum AnotherView {
-    False(Messages<MySecondViewMessage>),
+    False(Messages<MySecondViewMessage>, u32),
     True(Messages<MySecondViewMessage>),
 }
 
 impl View for AnotherView {
     fn build(&self) -> Element {
         let messages = match self {
-            AnotherView::False(m) => m,
+            AnotherView::False(m, _) => m,
             AnotherView::True(m) => m,
         };
 
         hstack((
             match self {
-                AnotherView::False(_) => PlusOne(0).element(),
+                AnotherView::False(_, data) => PlusOne(*data as u64).element(),
                 AnotherView::True(_) => MySecondView::default().element(),
             },
             Button::on_click(messages.send(MySecondViewMessage::Clicked)),
@@ -49,26 +49,27 @@ impl View for AnotherView {
     }
 
     fn messages(&mut self) {
-        let messages = match self {
-            AnotherView::False(m) => m,
-            AnotherView::True(m) => m,
+        let (messages, data) = match self {
+            AnotherView::False(m, data) => (m, data),
+            AnotherView::True(m) => (m, &mut 0),
         };
 
         let mut to_modify = false;
 
         while let Some(msg) = messages.recv() {
+            *data += 1;
             to_modify = true;
         }
-
-        return;
 
         if !to_modify {
             return;
         }
 
+        return;
+
         *self = match self {
-            AnotherView::False(messages) => AnotherView::True(messages.clone()),
-            AnotherView::True(messages) => AnotherView::False(messages.clone()),
+            AnotherView::False(messages, _) => AnotherView::True(messages.clone()),
+            AnotherView::True(messages) => AnotherView::False(messages.clone(), 0),
         }
     }
 }

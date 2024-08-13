@@ -10,8 +10,8 @@ use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-    Canvas, Element, Layout, MountableElement, MountedElementBehaviour, Point, ReflectState,
-    ReflectView, View, ViewElement,
+    Canvas, Element, Layout, MountableElement, MountedElementBehaviour, Point, RebuildResult,
+    ReflectState, ReflectView, View, ViewElement,
 };
 
 pub struct App<V> {
@@ -236,19 +236,6 @@ fn iter_fields(of: &mut dyn Reflect, mut f: impl FnMut(&str, &mut dyn Reflect)) 
         }
     }
 }
-
-fn mount_children(tree: &mut ElementTree, parent: NodeId, element: Element) {
-    let Element { el, children } = element;
-
-    let id = tree.insert(el, parent);
-
-    if let Some(children) = children {
-        for child in children {
-            mount_children(tree, id, child);
-        }
-    }
-}
-
 fn reflect_view_or_panic<'a>(registry: &TypeRegistry, view: &'a dyn Reflect) -> &'a dyn View {
     let reflect_view = registry
         .get_type_data::<ReflectView>(view.type_id())
@@ -275,12 +262,17 @@ struct ElementTree {
 
 impl ElementTree {
     pub fn create<V: View>(root_item: &V) -> Self {
+        Self::create_internal(root_item.build())
+    }
+
+    fn create_internal(element: Element) -> Self {
         let mut taffy = TaffyTree::default();
         let elements = HashMap::default();
 
         let root = taffy
             .new_leaf(taffy::Style {
                 size: taffy::Size {
+                    // todo
                     width: length(800.0),
                     height: length(800.0),
                 },
@@ -294,7 +286,7 @@ impl ElementTree {
             root,
         };
 
-        mount_children(&mut this, root, root_item.build());
+        mount_children(&mut this, root, element);
 
         this
     }
@@ -313,41 +305,80 @@ impl ElementTree {
             panic!()
         };
 
-        dbg!(self.taffy.total_node_count());
-        let mut taffy = TaffyTree::default();
-        let mut elements = HashMap::default();
+        let new_tree = Self::create_internal(view.build());
 
-        let it = view.build();
-
-        let Element { el, children } = it;
-
-        let id = taffy.new_leaf(el.style().0).unwrap();
-        elements.insert(id, el);
-
-        let mut new = Self {
-            taffy,
-            elements,
-            root: id,
-        };
-
-        if let Some(children) = children {
-            for child in children {
-                mount_children(&mut new, id, child);
-            }
-        }
-
-        self.comp_exchange(changed, new)
+        self.comp_exchange(changed, new_tree);
     }
 
     fn comp_exchange(&mut self, from: NodeId, mut other: ElementTree) {
-        let mut prev_parent = from;
-        let mut other_prev_parent = other.root;
+        fn iter_elements_cmp(
+            elements: &mut HashMap<NodeId, MountableElement>,
+            taffy: &mut TaffyTree,
+            parent: NodeId,
+            other_parent: NodeId,
+            other: &mut ElementTree,
+        ) {
+            for (idx, child) in taffy.children(parent).unwrap().into_iter().enumerate() {
+                let Ok(other_child) = other.taffy.child_at_index(other_parent, idx) else {
+                    todo!()
+                };
 
-        for (idx, child) in self.taffy.child_ids(prev_parent).enumerate() {
-            let Ok(other_child) = other.taffy.child_at_index(other_prev_parent, idx) else {
-                todo!()
-            };
+                let element = elements.get_mut(&child).unwrap();
+                let other_element = &other.elements[&other_child];
+
+                if mem::discriminant(element) != mem::discriminant(&other_element) {
+                    todo!();
+                    // other.elements.insert(other_node, other_element);
+                }
+
+                if let RebuildResult::Replace(unused_element) =
+                    element.try_rebuild(other.elements.remove(&other_child).unwrap())
+                {
+                    let mut to_delete = iter_elements(&taffy, child)
+                        .map(|it| it.1)
+                        .collect::<Vec<_>>();
+
+                    to_delete.push(child);
+
+                    for to_delete in to_delete {
+                        elements.remove(&to_delete).unwrap();
+                        let _ = taffy.remove(to_delete);
+                    }
+
+                    let new_id = taffy.new_leaf(unused_element.style().0).unwrap();
+                    taffy.insert_child_at_index(parent, idx, new_id).unwrap();
+                    elements.insert(new_id, unused_element);
+
+                    let mut old_to_new: HashMap<NodeId, NodeId> = Default::default();
+
+                    old_to_new.insert(other_parent, parent);
+                    old_to_new.insert(other_child, new_id);
+
+                    for (old_parent, to_create) in iter_elements(&other.taffy, other_child) {
+                        let element = other.elements.remove(&to_create).unwrap();
+                        let new = taffy.new_leaf(element.style().0).unwrap();
+
+                        old_to_new.insert(to_create, new);
+
+                        let parent = old_to_new[&old_parent];
+
+                        elements.insert(new, element);
+                        taffy.add_child(parent, new).unwrap();
+                    }
+                } else {
+                    iter_elements_cmp(elements, taffy, child, other_child, other);
+                }
+            }
         }
+
+        iter_elements_cmp(
+            &mut self.elements,
+            &mut self.taffy,
+            from,
+            other.root,
+            &mut other,
+        );
+
         // let should_just_remount = 'a: {
         //     for ((parent, node), (other_parent, other_node)) in
         //         iter_elements(&self.taffy, from).zip(iter_elements(&other.taffy, other.root))
@@ -391,35 +422,17 @@ impl ElementTree {
         let _ = self.taffy.remove(node);
     }
 
-    fn mount(&mut self, from: NodeId, other: ElementTree, from_other: NodeId) {
-        let to_delete = iter_elements(&self.taffy, from)
-            .map(|it| it.1)
-            .collect::<Vec<_>>();
+    fn mount(&mut self, from: NodeId, other: ElementTree, from_other: NodeId) {}
+}
 
-        for to_delete in to_delete {
-            self.remove_node(to_delete);
-        }
+fn mount_children(tree: &mut ElementTree, parent: NodeId, element: Element) {
+    let Element { el, children } = element;
 
-        let ElementTree {
-            taffy: new_taffy,
-            elements: mut new_elements,
-            root: other_root,
-        } = other;
+    let id = tree.insert(el, parent);
 
-        let mut old_to_new: HashMap<NodeId, NodeId> = Default::default();
-
-        old_to_new.insert(other_root, from);
-
-        for (old_parent, to_create) in iter_elements(&new_taffy, from_other) {
-            let element = new_elements.remove(&to_create).unwrap();
-            let new = self.taffy.new_leaf(element.style().0).unwrap();
-
-            old_to_new.insert(to_create, new);
-
-            let parent = old_to_new[&old_parent];
-
-            self.elements.insert(new, element);
-            self.taffy.add_child(parent, new).unwrap();
+    if let Some(children) = children {
+        for child in children {
+            mount_children(tree, id, child);
         }
     }
 }

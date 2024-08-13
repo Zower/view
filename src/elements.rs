@@ -56,8 +56,12 @@ impl MountedElementBehaviour for ViewElement {
             return RebuildResult::Replace(new);
         }
 
+        dbg!("REAPPLY");
+        dbg!(self.0.as_reflect());
+
         self.0.apply(new.0.as_reflect());
 
+        dbg!("AFTER", self.0.as_reflect());
         RebuildResult::Rebuilt
     }
 }

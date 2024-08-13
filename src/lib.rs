@@ -119,7 +119,9 @@ impl<M: Clone + 'static> Messages<M> {
         let sender = self.inner.tx.clone();
         Triggerable {
             f: Box::new(move || {
-                sender.send(message.clone()).expect("Failed to send");
+                if let Err(err) = sender.send(message.clone()) {
+                    dbg!("WARN: ", err);
+                }
             }),
         }
     }
