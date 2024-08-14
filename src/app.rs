@@ -424,12 +424,14 @@ fn mount_children(
 
     if let MountableElement::View(view) = &mut el {
         iter_fields(view.0.as_reflect_mut(), |_, field| {
+            dbg!(&field);
             if let Some(reflect_state) =
                 registry.get_type_data::<ReflectStateTrait>(field.type_id())
             {
                 let Some(state) = reflect_state.get_mut(field) else {
                     return;
                 };
+                dbg!("INIT");
 
                 state.init()
             }

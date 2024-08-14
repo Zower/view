@@ -2,9 +2,24 @@ use bevy_reflect::Reflect;
 use view::{hstack, run, Button, Element, IntoElement, Message, ReflectView, State, Text, View};
 
 fn main() -> view::Result<()> {
-    run(MyView {
+    run(Root {
         state: State::default(),
     })
+}
+
+#[derive(Reflect)]
+#[reflect(View)]
+struct Root {
+    state: State<u32, MySecondViewMessage>,
+}
+
+impl View for Root {
+    fn build(&self) -> Element {
+        MyView {
+            state: State::create_state(|| MyViewState::False),
+        }
+        .into()
+    }
 }
 
 #[derive(Reflect, Debug, Clone)]
@@ -25,20 +40,45 @@ impl Message for MySecondViewMessage {
 #[derive(Reflect)]
 #[reflect(View)]
 struct MyView {
-    state: State<u32, MySecondViewMessage>,
+    state: State<MyViewState, MyViewMessage>,
 }
 
 impl View for MyView {
     fn build(&self) -> Element {
-        AnotherView::True(State::default()).into()
+        hstack((
+            match *self.state {
+                MyViewState::False => MySecondView::default().element(),
+                MyViewState::True(data) => PlusOne(data).element(),
+            },
+            Button::on_click(self.state.then_send(MyViewMessage::Change)),
+        ))
     }
 }
 
-#[derive(Reflect)]
-#[reflect(View)]
-enum AnotherView {
-    False(State<u32, MySecondViewMessage>),
-    True(State<u32, MySecondViewMessage>),
+#[derive(Reflect, Debug, Clone)]
+enum MyViewState {
+    False,
+    True(u32),
+}
+
+#[derive(Reflect, Debug, Clone)]
+enum MyViewMessage {
+    Change,
+}
+
+impl Message for MyViewMessage {
+    type State = MyViewState;
+
+    fn reduce(self, state: &mut Self::State) {
+        match self {
+            MyViewMessage::Change => {
+                *state = match state {
+                    MyViewState::False => MyViewState::True(0),
+                    MyViewState::True(_) => MyViewState::False,
+                }
+            }
+        }
+    }
 }
 
 #[derive(Reflect, Debug, Clone)]
@@ -56,22 +96,6 @@ impl Message for AnotherViewMessage {
     }
 }
 
-impl View for AnotherView {
-    fn build(&self) -> Element {
-        let messages = match self {
-            AnotherView::False(m) => m,
-            AnotherView::True(m) => m,
-        };
-
-        hstack((
-            match self {
-                AnotherView::False(state) => PlusOne(**state).element(),
-                AnotherView::True(_) => MySecondView::default().element(),
-            },
-            Button::on_click(messages.then_send(MySecondViewMessage::Clicked)),
-        ))
-    }
-}
 #[derive(Reflect, Default, Debug)]
 #[reflect(View)]
 struct MySecondView {

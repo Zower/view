@@ -89,7 +89,7 @@ pub trait Message {
 
 #[derive(Reflect, Debug, Clone)]
 #[reflect(StateTrait)]
-pub struct State<S, M: Message<State = S> + Clone + 'static> {
+pub struct State<S: 'static, M: Message<State = S> + Clone + 'static> {
     #[reflect(ignore)]
     state: Option<S>,
     #[reflect(ignore)]
@@ -110,12 +110,12 @@ impl<S: 'static, M: Message<State = S> + Clone + 'static> StateTrait for State<S
 
     fn process(&mut self) {
         while let Some(message) = self.recv() {
-            message.reduce(self.get())
+            message.reduce(self.deref_mut())
         }
     }
 
     fn init(&mut self) {
-        self.get();
+        self.state = Some((self.create_state)());
     }
 
     fn reuse(&mut self, other: &mut dyn Reflect) {
@@ -125,7 +125,7 @@ impl<S: 'static, M: Message<State = S> + Clone + 'static> StateTrait for State<S
     }
 }
 
-impl<S: Default, M: Message<State = S> + Clone + 'static> Deref for State<S, M> {
+impl<S, M: Message<State = S> + Clone + 'static> Deref for State<S, M> {
     type Target = S;
 
     fn deref(&self) -> &Self::Target {
@@ -133,9 +133,9 @@ impl<S: Default, M: Message<State = S> + Clone + 'static> Deref for State<S, M> 
     }
 }
 
-impl<S: Default, M: Message<State = S> + Clone + 'static> DerefMut for State<S, M> {
+impl<S, M: Message<State = S> + Clone + 'static> DerefMut for State<S, M> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.get()
+        self.state.as_mut().unwrap()
     }
 }
 
@@ -163,8 +163,12 @@ impl<M> Default for MessageInner<M> {
 }
 
 impl<S, M: Message<State = S> + Clone + 'static> State<S, M> {
-    pub fn get(&mut self) -> &mut S {
-        self.state.get_or_insert_with(self.create_state)
+    pub fn create_state(f: fn() -> S) -> Self {
+        Self {
+            inner: MessageInner::default(),
+            state: None,
+            create_state: f,
+        }
     }
 
     pub fn then_send(&self, message: M) -> Triggerable {
