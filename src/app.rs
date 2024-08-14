@@ -5,10 +5,7 @@ use std::{
     ops::Deref,
 };
 
-use bevy_reflect::{
-    GetTypeRegistration, ParsedPath, Reflect, ReflectSerialize, TypeData, TypeRegistry,
-};
-use lsp_types::Registration;
+use bevy_reflect::{GetTypeRegistration, ParsedPath, Reflect, TypeRegistry};
 use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
@@ -308,80 +305,107 @@ impl ElementTree {
             panic!()
         };
 
-        let new_tree = Self::create_internal(registry, view.build());
-
-        self.comp_exchange(changed, new_tree, registry);
+        self.comp_exchange(changed, view.build(), registry);
     }
 
-    fn comp_exchange(&mut self, from: NodeId, mut other: ElementTree, registry: &TypeRegistry) {
+    fn comp_exchange(&mut self, view_id: NodeId, new_element: Element, registry: &TypeRegistry) {
         fn iter_elements_cmp(
             elements: &mut HashMap<NodeId, MountableElement>,
             taffy: &mut TaffyTree,
-            parent: NodeId,
-            other_parent: NodeId,
-            other: &mut ElementTree,
+            processing: NodeId,
+            new_element_at_position: Element,
+            // other_parent: NodeId,
+            // other: &mut ElementTree,
             registry: &TypeRegistry,
         ) {
-            for (idx, child) in taffy.children(parent).unwrap().into_iter().enumerate() {
-                let Ok(other_child) = other.taffy.child_at_index(other_parent, idx) else {
-                    todo!()
-                };
+            let Element {
+                el: mut new_element_at_position,
+                children: mut new_children,
+            } = new_element_at_position;
 
-                let element = elements.get_mut(&child).unwrap();
-                let other_element = &other.elements[&other_child];
+            let element_at_current_position = elements.remove(&processing).unwrap();
 
-                if mem::discriminant(element) != mem::discriminant(&other_element) {
-                    todo!();
-                    // other.elements.insert(other_node, other_element);
+            if mem::discriminant(&element_at_current_position)
+                != mem::discriminant(&new_element_at_position)
+            {
+                todo!();
+                // other.elements.insert(other_node, other_element);
+            }
+
+            if let RebuildResult::Replace =
+                new_element_at_position.try_reuse(element_at_current_position, registry)
+            {
+                panic!();
+                // let mut to_delete = iter_elements(&taffy, child)
+                //     .map(|it| it.1)
+                //     .collect::<Vec<_>>();
+
+                // to_delete.push(child);
+
+                // for to_delete in to_delete {
+                //     elements.remove(&to_delete).unwrap();
+                //     let _ = taffy.remove(to_delete);
+                // }
+
+                // let new_id = taffy.new_leaf(unused_element.style().0).unwrap();
+                // taffy.insert_child_at_index(parent, idx, new_id).unwrap();
+                // elements.insert(new_id, unused_element);
+
+                // let mut old_to_new: HashMap<NodeId, NodeId> = Default::default();
+
+                // old_to_new.insert(other_parent, parent);
+                // old_to_new.insert(other_child, new_id);
+
+                // for (old_parent, to_create) in iter_elements(&other.taffy, other_child) {
+                //     let element = other.elements.remove(&to_create).unwrap();
+                //     let new = taffy.new_leaf(element.style().0).unwrap();
+
+                //     old_to_new.insert(to_create, new);
+
+                //     let parent = old_to_new[&old_parent];
+
+                //     elements.insert(new, element);
+                //     taffy.add_child(parent, new).unwrap();
+                // }
+            } else {
+                if let MountableElement::View(view) = &mut new_element_at_position {
+                    new_children = Some(vec![view.0.build()]);
                 }
 
-                if let RebuildResult::Replace(unused_element) =
-                    element.try_rebuild(other.elements.remove(&other_child).unwrap(), registry)
-                {
-                    panic!();
-                    let mut to_delete = iter_elements(&taffy, child)
-                        .map(|it| it.1)
-                        .collect::<Vec<_>>();
+                elements.insert(processing, new_element_at_position);
 
-                    to_delete.push(child);
-
-                    for to_delete in to_delete {
-                        elements.remove(&to_delete).unwrap();
-                        let _ = taffy.remove(to_delete);
+                if let Some(children) = new_children {
+                    for (idx, child) in children.into_iter().enumerate() {
+                        iter_elements_cmp(
+                            elements,
+                            taffy,
+                            taffy.child_at_index(processing, idx).unwrap(),
+                            child,
+                            registry,
+                        );
                     }
-
-                    let new_id = taffy.new_leaf(unused_element.style().0).unwrap();
-                    taffy.insert_child_at_index(parent, idx, new_id).unwrap();
-                    elements.insert(new_id, unused_element);
-
-                    let mut old_to_new: HashMap<NodeId, NodeId> = Default::default();
-
-                    old_to_new.insert(other_parent, parent);
-                    old_to_new.insert(other_child, new_id);
-
-                    for (old_parent, to_create) in iter_elements(&other.taffy, other_child) {
-                        let element = other.elements.remove(&to_create).unwrap();
-                        let new = taffy.new_leaf(element.style().0).unwrap();
-
-                        old_to_new.insert(to_create, new);
-
-                        let parent = old_to_new[&old_parent];
-
-                        elements.insert(new, element);
-                        taffy.add_child(parent, new).unwrap();
-                    }
-                } else {
-                    iter_elements_cmp(elements, taffy, child, other_child, other, registry);
                 }
             }
+
+            // for (idx, child) in taffy.children(parent).unwrap().into_iter().enumerate() {
+            //     let Ok(other_child) = other.taffy.child_at_index(other_parent, idx) else {
+            //         todo!()
+            //     };
+
+            //     let element = elements.get_mut(&child).unwrap();
+            //     let other_element = &other.elements[&other_child];
+
+            // }
         }
+
+        debug_assert!(self.taffy.child_count(view_id) == 1);
+        let only_child = self.taffy.child_at_index(view_id, 0).unwrap();
 
         iter_elements_cmp(
             &mut self.elements,
             &mut self.taffy,
-            from,
-            other.root,
-            &mut other,
+            only_child,
+            new_element,
             registry,
         );
     }

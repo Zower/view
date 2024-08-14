@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use bevy_reflect::Reflect;
 use view::{hstack, run, Button, Element, IntoElement, Message, ReflectView, State, Text, View};
 
@@ -41,6 +39,21 @@ impl View for MyView {
 enum AnotherView {
     False(State<u32, MySecondViewMessage>),
     True(State<u32, MySecondViewMessage>),
+}
+
+#[derive(Reflect, Debug, Clone)]
+enum AnotherViewMessage {
+    Clicked,
+}
+
+impl Message for AnotherViewMessage {
+    type State = u32;
+
+    fn reduce(self, state: &mut Self::State) {
+        match self {
+            AnotherViewMessage::Clicked => *state += 1,
+        }
+    }
 }
 
 impl View for AnotherView {

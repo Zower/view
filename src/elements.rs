@@ -2,6 +2,7 @@ use core::panic;
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
+    thread::panicking,
 };
 
 use bevy_reflect::{ReflectMut, TypeRegistry};
@@ -28,67 +29,43 @@ pub(crate) trait MountedElementBehaviour {
     #[allow(unused_variables)]
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
 
-    fn try_rebuild(&mut self, new: Self, registry: &TypeRegistry) -> RebuildResult<Self>
+    fn try_reuse(&mut self, old: Self, registry: &TypeRegistry) -> RebuildResult
     where
         Self: Sized;
 }
 
-pub(crate) enum RebuildResult<T> {
+pub(crate) enum RebuildResult {
     Rebuilt,
-    Replace(T),
-}
-
-impl<T> RebuildResult<T> {
-    pub fn map<U>(self, f: impl Fn(T) -> U) -> RebuildResult<U> {
-        match self {
-            RebuildResult::Rebuilt => RebuildResult::Rebuilt,
-            RebuildResult::Replace(t) => RebuildResult::Replace(f(t)),
-        }
-    }
+    Replace,
 }
 
 pub struct ViewElement(pub(crate) Box<dyn View>);
 
 impl MountedElementBehaviour for ViewElement {
-    fn try_rebuild(&mut self, mut new: Self, registry: &TypeRegistry) -> RebuildResult<Self>
+    fn try_reuse(&mut self, mut old: Self, registry: &TypeRegistry) -> RebuildResult
     where
         Self: Sized,
     {
-        if self.0.type_id() != new.0.type_id() {
-            return RebuildResult::Replace(new);
+        if self.0.type_id() != old.0.type_id() {
+            return RebuildResult::Replace;
         }
-
-        dbg!("REBUILD");
-
-        dbg!(&self);
 
         iter_fields(self.0.as_reflect_mut(), |index, field| {
             if let Some(reflect_state) =
                 registry.get_type_data::<ReflectStateTrait>(field.type_id())
             {
                 if let Some(state) = reflect_state.get_mut(field) {
-                    if let ReflectMut::Struct(st) = new.0.reflect_mut() {
-                        state.reapply(st.field_at_mut(index).unwrap());
-                    } else if let ReflectMut::Enum(en) = new.0.reflect_mut() {
-                        state.reapply(en.field_at_mut(index).unwrap());
+                    if let ReflectMut::Struct(st) = old.0.reflect_mut() {
+                        state.reuse(st.field_at_mut(index).unwrap());
+                    } else if let ReflectMut::Enum(en) = old.0.reflect_mut() {
+                        panic!();
+                        // state.reuse(en.field_at_mut(index).unwrap());
+                    } else {
+                        panic!()
                     }
-                }
-            } else {
-                dbg!(&field);
-                if let ReflectMut::Struct(st) = new.0.reflect_mut() {
-                    field.apply(st.field_at(index).unwrap())
-                } else if let ReflectMut::Enum(en) = new.0.reflect_mut() {
-                    field.apply(en.field_at(index).unwrap())
-                } else if let ReflectMut::TupleStruct(ts) = new.0.reflect_mut() {
-                    dbg!(&ts.as_reflect(), index);
-                    field.apply(ts.field(index).unwrap())
-                } else {
-                    panic!()
                 }
             }
         });
-
-        dbg!(&self);
 
         RebuildResult::Rebuilt
     }
@@ -207,12 +184,10 @@ mod button {
             );
         }
 
-        fn try_rebuild(&mut self, new: Self, _: &TypeRegistry) -> RebuildResult<Self>
+        fn try_reuse(&mut self, _: Self, _: &TypeRegistry) -> RebuildResult
         where
             Self: Sized,
         {
-            self.on_click = new.on_click;
-
             RebuildResult::Rebuilt
         }
     }
@@ -316,13 +291,10 @@ mod text {
             }
         }
 
-        fn try_rebuild(&mut self, new: Self, _: &TypeRegistry) -> RebuildResult<Self>
+        fn try_reuse(&mut self, _: Self, _: &TypeRegistry) -> RebuildResult
         where
             Self: Sized,
         {
-            self.unused_text = new.unused_text;
-            self.wrap = new.wrap;
-
             RebuildResult::Rebuilt
         }
     }
@@ -341,7 +313,7 @@ mod stack {
             super::Style::default().with_direction(taffy::FlexDirection::Row)
         }
 
-        fn try_rebuild(&mut self, _: Self, _: &TypeRegistry) -> RebuildResult<Self>
+        fn try_reuse(&mut self, _: Self, _: &TypeRegistry) -> RebuildResult
         where
             Self: Sized,
         {
@@ -404,26 +376,5 @@ impl Debug for ViewElement {
         f.debug_tuple("ViewElement")
             .field(&self.0.as_reflect())
             .finish()
-    }
-}
-
-impl From<RebuildResult<Button>> for RebuildResult<MountableElement> {
-    fn from(value: RebuildResult<Button>) -> Self {
-        value.map(Into::into)
-    }
-}
-impl From<RebuildResult<Text>> for RebuildResult<MountableElement> {
-    fn from(value: RebuildResult<Text>) -> Self {
-        value.map(Into::into)
-    }
-}
-impl From<RebuildResult<HStack>> for RebuildResult<MountableElement> {
-    fn from(value: RebuildResult<HStack>) -> Self {
-        value.map(Into::into)
-    }
-}
-impl From<RebuildResult<ViewElement>> for RebuildResult<MountableElement> {
-    fn from(value: RebuildResult<ViewElement>) -> Self {
-        value.map(Into::into)
     }
 }

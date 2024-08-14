@@ -3,7 +3,7 @@ use std::time::Instant;
 use glutin::{prelude::PossiblyCurrentGlContext, surface::GlSurface};
 use miette::IntoDiagnostic;
 use winit::{
-    event::{ElementState, MouseButton, StartCause, WindowEvent},
+    event::{ElementState, StartCause, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
 };
 
@@ -101,7 +101,6 @@ impl Runner {
                         }
                         WindowEvent::MouseInput {
                             state: ElementState::Pressed,
-                            button,
                             ..
                         } => {
                             let now = Instant::now();

@@ -77,7 +77,7 @@ impl DerefMut for Canvas {
 pub(crate) trait StateTrait {
     fn is_dirty(&self) -> bool;
     fn init(&mut self);
-    fn reapply(&mut self, other: &mut dyn Reflect);
+    fn reuse(&mut self, other: &mut dyn Reflect);
     fn process(&mut self);
 }
 
@@ -118,10 +118,10 @@ impl<S: 'static, M: Message<State = S> + Clone + 'static> StateTrait for State<S
         self.get();
     }
 
-    fn reapply(&mut self, other: &mut dyn Reflect) {
+    fn reuse(&mut self, other: &mut dyn Reflect) {
         let selfy = other.as_any_mut().downcast_mut::<Self>().unwrap();
 
-        std::mem::swap(&mut self.inner, &mut selfy.inner);
+        std::mem::swap(&mut self.state, &mut selfy.state);
     }
 }
 
