@@ -5,13 +5,16 @@ use std::{
     ops::Deref,
 };
 
-use bevy_reflect::{GetTypeRegistration, ParsedPath, Reflect, TypeRegistry};
+use bevy_reflect::{
+    GetTypeRegistration, ParsedPath, Reflect, ReflectSerialize, TypeData, TypeRegistry,
+};
+use lsp_types::Registration;
 use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
 use crate::{
     Canvas, Element, Layout, MountableElement, MountedElementBehaviour, Point, RebuildResult,
-    ReflectState, ReflectView, View, ViewElement,
+    ReflectStateTrait, ReflectView, View, ViewElement,
 };
 
 pub struct App<V> {
@@ -34,7 +37,7 @@ impl<V: View + GetTypeRegistration> App<V> {
 
         type_registry.register::<V>();
 
-        let tree = ElementTree::create(&view);
+        let tree = ElementTree::create(&type_registry, &view);
 
         Self {
             registry: type_registry,
@@ -82,25 +85,28 @@ impl<V: View> App<V> {
             let mut is_dirty = false;
 
             iter_fields(view.as_reflect_mut(), |_, field| {
-                if let Some(reflect_state) =
-                    self.registry.get_type_data::<ReflectState>(field.type_id())
+                if let Some(reflect_state) = self
+                    .registry
+                    .get_type_data::<ReflectStateTrait>(field.type_id())
                 {
-                    let Some(state) = reflect_state.get(field) else {
+                    let Some(state) = reflect_state.get_mut(field) else {
                         return;
                     };
 
-                    is_dirty = is_dirty || state.is_dirty();
+                    if state.is_dirty() {
+                        state.process();
+                        is_dirty = true;
+                    }
                 }
             });
 
             if is_dirty {
-                view.messages();
                 dirty_views.push(node);
             }
         }
 
         for dirty in dirty_views {
-            self.tree.modify_if_necessary(dirty);
+            self.tree.modify_if_necessary(&self.registry, dirty);
         }
     }
 
@@ -193,40 +199,37 @@ fn iter_elements<'a>(
     }
 }
 
-fn iter_fields(of: &mut dyn Reflect, mut f: impl FnMut(&str, &mut dyn Reflect)) {
+pub(crate) fn iter_fields(of: &mut dyn Reflect, mut f: impl FnMut(usize, &mut dyn Reflect)) {
     match of.reflect_mut() {
         bevy_reflect::ReflectMut::Struct(s) => {
             let mut index = 0;
 
             loop {
-                let name = s.name_at(index).map(|it| it.to_owned());
                 let Some(item) = s.field_at_mut(index) else {
                     break;
                 };
-                index += 1;
 
-                // iter_views(reg, item, f)
-                f(&name.unwrap(), item);
+                f(index, item);
+
+                index += 1;
             }
         }
         bevy_reflect::ReflectMut::Enum(e) => {
             let mut index = 0;
 
             while let Some(item) = e.field_at_mut(index) {
-                let str = format!(".{}", index);
+                f(index, item);
 
                 index += 1;
-
-                f(&str, item)
             }
         }
         bevy_reflect::ReflectMut::TupleStruct(ts) => {
             let mut index = 0;
 
             while let Some(item) = ts.field_mut(index) {
-                index += 1;
+                f(index, item);
 
-                f(&format!(".{}", index), item)
+                index += 1;
             }
         }
         bevy_reflect::ReflectMut::Value(_) => {}
@@ -261,11 +264,11 @@ struct ElementTree {
 }
 
 impl ElementTree {
-    pub fn create<V: View>(root_item: &V) -> Self {
-        Self::create_internal(root_item.build())
+    pub fn create<V: View>(registry: &TypeRegistry, root_item: &V) -> Self {
+        Self::create_internal(registry, root_item.build())
     }
 
-    fn create_internal(element: Element) -> Self {
+    fn create_internal(registry: &TypeRegistry, element: Element) -> Self {
         let mut taffy = TaffyTree::default();
         let elements = HashMap::default();
 
@@ -286,7 +289,7 @@ impl ElementTree {
             root,
         };
 
-        mount_children(&mut this, root, element);
+        mount_children(registry, &mut this, root, element);
 
         this
     }
@@ -300,23 +303,24 @@ impl ElementTree {
         id
     }
 
-    pub fn modify_if_necessary(&mut self, changed: NodeId) {
+    pub fn modify_if_necessary(&mut self, registry: &TypeRegistry, changed: NodeId) {
         let Some(MountableElement::View(ViewElement(view))) = self.elements.get(&changed) else {
             panic!()
         };
 
-        let new_tree = Self::create_internal(view.build());
+        let new_tree = Self::create_internal(registry, view.build());
 
-        self.comp_exchange(changed, new_tree);
+        self.comp_exchange(changed, new_tree, registry);
     }
 
-    fn comp_exchange(&mut self, from: NodeId, mut other: ElementTree) {
+    fn comp_exchange(&mut self, from: NodeId, mut other: ElementTree, registry: &TypeRegistry) {
         fn iter_elements_cmp(
             elements: &mut HashMap<NodeId, MountableElement>,
             taffy: &mut TaffyTree,
             parent: NodeId,
             other_parent: NodeId,
             other: &mut ElementTree,
+            registry: &TypeRegistry,
         ) {
             for (idx, child) in taffy.children(parent).unwrap().into_iter().enumerate() {
                 let Ok(other_child) = other.taffy.child_at_index(other_parent, idx) else {
@@ -332,8 +336,9 @@ impl ElementTree {
                 }
 
                 if let RebuildResult::Replace(unused_element) =
-                    element.try_rebuild(other.elements.remove(&other_child).unwrap())
+                    element.try_rebuild(other.elements.remove(&other_child).unwrap(), registry)
                 {
+                    panic!();
                     let mut to_delete = iter_elements(&taffy, child)
                         .map(|it| it.1)
                         .collect::<Vec<_>>();
@@ -366,7 +371,7 @@ impl ElementTree {
                         taffy.add_child(parent, new).unwrap();
                     }
                 } else {
-                    iter_elements_cmp(elements, taffy, child, other_child, other);
+                    iter_elements_cmp(elements, taffy, child, other_child, other, registry);
                 }
             }
         }
@@ -377,62 +382,43 @@ impl ElementTree {
             from,
             other.root,
             &mut other,
+            registry,
         );
-
-        // let should_just_remount = 'a: {
-        //     for ((parent, node), (other_parent, other_node)) in
-        //         iter_elements(&self.taffy, from).zip(iter_elements(&other.taffy, other.root))
-        //     {
-        //         // Make sure both parents change at the same time (same number of children)
-        //         if prev_parent != parent {
-        //             if other_parent == other_prev_parent {
-        //                 break 'a true;
-        //             } else {
-        //                 prev_parent = parent;
-        //                 other_prev_parent = other_parent
-        //             }
-        //         }
-
-        //         let element = self.elements.get_mut(&node).unwrap();
-        //         let other_element = other.elements.remove(&other_node).unwrap();
-
-        //         if mem::discriminant(element) != mem::discriminant(&other_element) {
-        //             other.elements.insert(other_node, other_element);
-        //             break 'a true;
-        //         }
-
-        //         if let crate::RebuildResult::Replace(unused_element) =
-        //             element.try_rebuild(other_element)
-        //         {
-        //             other.elements.insert(other_node, unused_element);
-        //             break 'a true;
-        //         }
-        //     }
-
-        //     false
-        // };
-
-        // if should_just_remount {
-        //     self.mount(from, other);
-        // }
     }
-
-    fn remove_node(&mut self, node: NodeId) {
-        self.elements.remove(&node).unwrap();
-        let _ = self.taffy.remove(node);
-    }
-
-    fn mount(&mut self, from: NodeId, other: ElementTree, from_other: NodeId) {}
 }
 
-fn mount_children(tree: &mut ElementTree, parent: NodeId, element: Element) {
-    let Element { el, children } = element;
+fn mount_children(
+    registry: &TypeRegistry,
+    tree: &mut ElementTree,
+    parent: NodeId,
+    element: Element,
+) {
+    let Element {
+        mut el,
+        mut children,
+    } = element;
+
+    if let MountableElement::View(view) = &mut el {
+        iter_fields(view.0.as_reflect_mut(), |_, field| {
+            if let Some(reflect_state) =
+                registry.get_type_data::<ReflectStateTrait>(field.type_id())
+            {
+                let Some(state) = reflect_state.get_mut(field) else {
+                    return;
+                };
+
+                state.init()
+            }
+        });
+
+        children = Some(vec![view.0.build()]);
+    }
 
     let id = tree.insert(el, parent);
 
     if let Some(children) = children {
         for child in children {
-            mount_children(tree, id, child);
+            mount_children(registry, tree, id, child);
         }
     }
 }

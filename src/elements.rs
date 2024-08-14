@@ -1,15 +1,17 @@
+use core::panic;
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
 
+use bevy_reflect::{ReflectMut, TypeRegistry};
 pub use button::*;
 pub use stack::HStack;
 pub use stack::*;
 use taffy::prelude::auto;
 pub use text::*;
 
-use crate::{Canvas, View};
+use crate::{app::iter_fields, Canvas, ReflectStateTrait, View};
 
 #[enum_delegate::register]
 pub(crate) trait MountedElementBehaviour {
@@ -26,7 +28,7 @@ pub(crate) trait MountedElementBehaviour {
     #[allow(unused_variables)]
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
 
-    fn try_rebuild(&mut self, new: Self) -> RebuildResult<Self>
+    fn try_rebuild(&mut self, new: Self, registry: &TypeRegistry) -> RebuildResult<Self>
     where
         Self: Sized;
 }
@@ -48,7 +50,7 @@ impl<T> RebuildResult<T> {
 pub struct ViewElement(pub(crate) Box<dyn View>);
 
 impl MountedElementBehaviour for ViewElement {
-    fn try_rebuild(&mut self, new: Self) -> RebuildResult<Self>
+    fn try_rebuild(&mut self, mut new: Self, registry: &TypeRegistry) -> RebuildResult<Self>
     where
         Self: Sized,
     {
@@ -56,12 +58,38 @@ impl MountedElementBehaviour for ViewElement {
             return RebuildResult::Replace(new);
         }
 
-        dbg!("REAPPLY");
-        dbg!(self.0.as_reflect());
+        dbg!("REBUILD");
 
-        self.0.apply(new.0.as_reflect());
+        dbg!(&self);
 
-        dbg!("AFTER", self.0.as_reflect());
+        iter_fields(self.0.as_reflect_mut(), |index, field| {
+            if let Some(reflect_state) =
+                registry.get_type_data::<ReflectStateTrait>(field.type_id())
+            {
+                if let Some(state) = reflect_state.get_mut(field) {
+                    if let ReflectMut::Struct(st) = new.0.reflect_mut() {
+                        state.reapply(st.field_at_mut(index).unwrap());
+                    } else if let ReflectMut::Enum(en) = new.0.reflect_mut() {
+                        state.reapply(en.field_at_mut(index).unwrap());
+                    }
+                }
+            } else {
+                dbg!(&field);
+                if let ReflectMut::Struct(st) = new.0.reflect_mut() {
+                    field.apply(st.field_at(index).unwrap())
+                } else if let ReflectMut::Enum(en) = new.0.reflect_mut() {
+                    field.apply(en.field_at(index).unwrap())
+                } else if let ReflectMut::TupleStruct(ts) = new.0.reflect_mut() {
+                    dbg!(&ts.as_reflect(), index);
+                    field.apply(ts.field(index).unwrap())
+                } else {
+                    panic!()
+                }
+            }
+        });
+
+        dbg!(&self);
+
         RebuildResult::Rebuilt
     }
 }
@@ -89,10 +117,9 @@ impl Element {
 
 impl<V: View> From<V> for Element {
     fn from(value: V) -> Self {
-        let child = value.build();
         Element {
             el: MountableElement::View(ViewElement(Box::new(value))),
-            children: Some(vec![child]),
+            children: None,
         }
     }
 }
@@ -127,6 +154,7 @@ pub enum ElementEvent {
 mod button {
     use std::fmt::Debug;
 
+    use bevy_reflect::TypeRegistry;
     use bon::builder;
 
     use crate::{Color, Layout, Triggerable};
@@ -179,7 +207,7 @@ mod button {
             );
         }
 
-        fn try_rebuild(&mut self, new: Self) -> RebuildResult<Self>
+        fn try_rebuild(&mut self, new: Self, _: &TypeRegistry) -> RebuildResult<Self>
         where
             Self: Sized,
         {
@@ -195,6 +223,7 @@ mod button {
 }
 
 mod text {
+    use bevy_reflect::TypeRegistry;
     use bon::bon;
     use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, Metrics};
 
@@ -287,7 +316,7 @@ mod text {
             }
         }
 
-        fn try_rebuild(&mut self, new: Self) -> RebuildResult<Self>
+        fn try_rebuild(&mut self, new: Self, _: &TypeRegistry) -> RebuildResult<Self>
         where
             Self: Sized,
         {
@@ -300,6 +329,8 @@ mod text {
 }
 
 mod stack {
+    use bevy_reflect::TypeRegistry;
+
     use super::{ChildView, Element, MountedElementBehaviour, RebuildResult};
 
     #[derive(Debug)]
@@ -310,7 +341,7 @@ mod stack {
             super::Style::default().with_direction(taffy::FlexDirection::Row)
         }
 
-        fn try_rebuild(&mut self, _: Self) -> RebuildResult<Self>
+        fn try_rebuild(&mut self, _: Self, _: &TypeRegistry) -> RebuildResult<Self>
         where
             Self: Sized,
         {

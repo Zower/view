@@ -46,8 +46,6 @@ pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
 #[reflect_trait]
 pub trait View: Reflect {
     fn build(&self) -> Element;
-
-    fn messages(&mut self) {}
 }
 
 pub struct Canvas {
@@ -76,27 +74,77 @@ impl DerefMut for Canvas {
 }
 
 #[reflect_trait]
-pub trait State {
+pub(crate) trait StateTrait {
     fn is_dirty(&self) -> bool;
+    fn init(&mut self);
+    fn reapply(&mut self, other: &mut dyn Reflect);
+    fn process(&mut self);
+}
+
+pub trait Message {
+    type State;
+
+    fn reduce(self, state: &mut Self::State);
 }
 
 #[derive(Reflect, Debug, Clone)]
-#[reflect(State)]
-pub struct Messages<M> {
+#[reflect(StateTrait)]
+pub struct State<S, M: Message<State = S> + Clone + 'static> {
+    #[reflect(ignore)]
+    state: Option<S>,
     #[reflect(ignore)]
     inner: MessageInner<M>,
+    #[reflect(ignore)]
+    #[reflect(default = "create_state_fake")]
+    create_state: fn() -> S,
 }
 
-impl<M> State for Messages<M> {
+fn create_state_fake<S>() -> fn() -> S {
+    panic!()
+}
+
+impl<S: 'static, M: Message<State = S> + Clone + 'static> StateTrait for State<S, M> {
     fn is_dirty(&self) -> bool {
         !self.inner.rx.is_empty()
     }
+
+    fn process(&mut self) {
+        while let Some(message) = self.recv() {
+            message.reduce(self.get())
+        }
+    }
+
+    fn init(&mut self) {
+        self.get();
+    }
+
+    fn reapply(&mut self, other: &mut dyn Reflect) {
+        let selfy = other.as_any_mut().downcast_mut::<Self>().unwrap();
+
+        std::mem::swap(&mut self.inner, &mut selfy.inner);
+    }
 }
 
-impl<M> Default for Messages<M> {
+impl<S: Default, M: Message<State = S> + Clone + 'static> Deref for State<S, M> {
+    type Target = S;
+
+    fn deref(&self) -> &Self::Target {
+        self.state.as_ref().unwrap()
+    }
+}
+
+impl<S: Default, M: Message<State = S> + Clone + 'static> DerefMut for State<S, M> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.get()
+    }
+}
+
+impl<S: Default, M: Message<State = S> + Clone + 'static> Default for State<S, M> {
     fn default() -> Self {
         Self {
             inner: MessageInner::default(),
+            state: None,
+            create_state: Default::default,
         }
     }
 }
@@ -114,8 +162,12 @@ impl<M> Default for MessageInner<M> {
     }
 }
 
-impl<M: Clone + 'static> Messages<M> {
-    pub fn send(&self, message: M) -> Triggerable {
+impl<S, M: Message<State = S> + Clone + 'static> State<S, M> {
+    pub fn get(&mut self) -> &mut S {
+        self.state.get_or_insert_with(self.create_state)
+    }
+
+    pub fn then_send(&self, message: M) -> Triggerable {
         let sender = self.inner.tx.clone();
         Triggerable {
             f: Box::new(move || {
@@ -126,7 +178,7 @@ impl<M: Clone + 'static> Messages<M> {
         }
     }
 
-    pub fn recv(&self) -> Option<M> {
+    fn recv(&self) -> Option<M> {
         self.inner
             .rx
             .try_recv()
