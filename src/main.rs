@@ -115,7 +115,6 @@ struct PlusOne(u32);
 
 impl View for PlusOne {
     fn build(&self) -> Element {
-        dbg!("---------------------------------------");
         hstack((
             Text::builder().text(format!("{}", self.0)).build(),
             Text::builder().text(format!("{}", self.0)).build(),

@@ -3,6 +3,7 @@ use std::{
     hash::Hash,
     mem,
     ops::Deref,
+    usize,
 };
 
 use bevy_reflect::{GetTypeRegistration, ParsedPath, Reflect, TypeRegistry};
@@ -108,7 +109,7 @@ impl<V: View> App<V> {
     }
 
     pub fn paint(&mut self, size: winit::dpi::PhysicalSize<u32>, canvas: &mut Canvas) {
-        self.tree.taffy.print_tree(self.tree.root);
+        dbg!(self.tree.taffy.total_node_count());
         self.tree
             .taffy
             .compute_layout(
@@ -287,7 +288,7 @@ impl ElementTree {
             root,
         };
 
-        mount_children(registry, &mut this, root, element);
+        mount_children(registry, &mut this, root, element, None);
 
         this
     }
@@ -296,6 +297,14 @@ impl ElementTree {
         let id = self.taffy.new_leaf(element.style().0).unwrap();
         self.taffy.add_child(parent, id).unwrap();
 
+        self.elements.insert(id, element);
+
+        id
+    }
+
+    pub fn insert_at(&mut self, element: MountableElement, parent: NodeId, idx: usize) -> NodeId {
+        let id = self.taffy.new_leaf(element.style().0).unwrap();
+        self.taffy.insert_child_at_index(parent, idx, id).unwrap();
         self.elements.insert(id, element);
 
         id
@@ -341,6 +350,12 @@ impl ElementTree {
                     .map(|it| it.1)
                     .collect::<Vec<_>>();
 
+                let mut idx = 0;
+
+                while let false = taffy.child_at_index(parent, idx).unwrap() == processing {
+                    idx += 1;
+                }
+
                 taffy.remove(processing).unwrap();
 
                 for to_delete in to_delete {
@@ -349,7 +364,7 @@ impl ElementTree {
                 }
 
                 // todo this will lead to wrong position
-                mount_children(registry, tree, parent, new_element_at_position);
+                mount_children(registry, tree, parent, new_element_at_position, Some(idx));
 
                 return;
             }
@@ -362,15 +377,21 @@ impl ElementTree {
                     .map(|it| it.1)
                     .collect::<Vec<_>>();
 
-                taffy.remove(processing).unwrap();
-
                 for to_delete in to_delete {
                     elements.remove(&to_delete).unwrap();
                     let _ = taffy.remove(to_delete);
                 }
 
+                let mut idx = 0;
+
+                while let false = taffy.child_at_index(parent, idx).unwrap() == processing {
+                    idx += 1;
+                }
+
+                taffy.remove(processing).unwrap();
+
                 // todo this will lead to wrong position
-                mount_children(registry, tree, parent, new_element_at_position);
+                mount_children(registry, tree, parent, new_element_at_position, Some(idx));
             } else {
                 if let MountableElement::View(view) = new_mountable_element {
                     new_element_at_position.children = Some(vec![view.0.build()]);
@@ -410,13 +431,12 @@ fn mount_children(
     tree: &mut ElementTree,
     parent: NodeId,
     element: Element,
+    idx: Option<usize>,
 ) {
     let Element {
         mut el,
         mut children,
     } = element;
-
-    dbg!(parent, &el);
 
     if let MountableElement::View(view) = &mut el {
         view.0.register(registry);
@@ -436,11 +456,15 @@ fn mount_children(
         children = Some(vec![view.0.build()]);
     }
 
-    let id = tree.insert(el, parent);
+    let id = if let Some(idx) = idx {
+        tree.insert_at(el, parent, idx)
+    } else {
+        tree.insert(el, parent)
+    };
 
     if let Some(children) = children {
         for child in children {
-            mount_children(registry, tree, id, child);
+            mount_children(registry, tree, id, child, None);
         }
     }
 }
