@@ -1,7 +1,9 @@
 use std::ops::{Deref, DerefMut};
 
 use app::App;
-use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, Reflect};
+use bevy_reflect::{
+    reflect_trait, GetPath, GetTypeRegistration, Reflect, TypeData, TypeRegistration, TypeRegistry,
+};
 
 mod app;
 mod elements;
@@ -46,6 +48,7 @@ pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
 #[reflect_trait]
 pub trait View: Reflect {
     fn build(&self) -> Element;
+    fn register(&self, registry: &mut TypeRegistry);
 }
 
 pub struct Canvas {

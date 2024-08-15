@@ -1,17 +1,13 @@
-use bevy_reflect::Reflect;
+use bevy_reflect::{GetTypeRegistration, Reflect, TypeRegistry};
 use view::{hstack, run, Button, Element, IntoElement, Message, ReflectView, State, Text, View};
 
 fn main() -> view::Result<()> {
-    run(Root {
-        state: State::default(),
-    })
+    run(Root)
 }
 
 #[derive(Reflect)]
 #[reflect(View)]
-struct Root {
-    state: State<u32, MySecondViewMessage>,
-}
+struct Root;
 
 impl View for Root {
     fn build(&self) -> Element {
@@ -20,20 +16,10 @@ impl View for Root {
         }
         .into()
     }
-}
 
-#[derive(Reflect, Debug, Clone)]
-enum MySecondViewMessage {
-    Clicked,
-}
-
-impl Message for MySecondViewMessage {
-    type State = u32;
-
-    fn reduce(self, state: &mut Self::State) {
-        match self {
-            MySecondViewMessage::Clicked => *state += 1,
-        }
+    fn register(&self, registry: &mut TypeRegistry) {
+        registry.register::<Self>();
+        Self::register_type_dependencies(registry);
     }
 }
 
@@ -52,6 +38,11 @@ impl View for MyView {
             },
             Button::on_click(self.state.then_send(MyViewMessage::Change)),
         ))
+    }
+
+    fn register(&self, registry: &mut TypeRegistry) {
+        registry.register::<Self>();
+        Self::register_type_dependencies(registry);
     }
 }
 
@@ -82,16 +73,16 @@ impl Message for MyViewMessage {
 }
 
 #[derive(Reflect, Debug, Clone)]
-enum AnotherViewMessage {
+enum MySecondViewMessage {
     Clicked,
 }
 
-impl Message for AnotherViewMessage {
+impl Message for MySecondViewMessage {
     type State = u32;
 
     fn reduce(self, state: &mut Self::State) {
         match self {
-            AnotherViewMessage::Clicked => *state += 1,
+            MySecondViewMessage::Clicked => *state += 1,
         }
     }
 }
@@ -111,6 +102,11 @@ impl View for MySecondView {
             PlusOne(*self.state + 1),
         ))
     }
+
+    fn register(&self, registry: &mut TypeRegistry) {
+        registry.register::<Self>();
+        Self::register_type_dependencies(registry);
+    }
 }
 
 #[derive(Reflect, Default, Debug)]
@@ -119,10 +115,16 @@ struct PlusOne(u32);
 
 impl View for PlusOne {
     fn build(&self) -> Element {
+        dbg!("---------------------------------------");
         hstack((
             Text::builder().text(format!("{}", self.0)).build(),
             Text::builder().text(format!("{}", self.0)).build(),
             Text::builder().text(format!("{}", self.0)).build(),
         ))
+    }
+
+    fn register(&self, registry: &mut TypeRegistry) {
+        registry.register::<Self>();
+        Self::register_type_dependencies(registry);
     }
 }
