@@ -2,7 +2,6 @@ use core::panic;
 use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
-    thread::panicking,
 };
 
 use bevy_reflect::{ReflectMut, TypeRegistry};
@@ -134,7 +133,7 @@ mod button {
     use bevy_reflect::TypeRegistry;
     use bon::builder;
 
-    use crate::{Color, Layout, Triggerable};
+    use crate::{ButtonMessage, Color, Layout, Receiver, State, Triggerable};
 
     use super::{Element, ElementEvent, MountedElementBehaviour, RebuildResult};
 
@@ -146,6 +145,14 @@ mod button {
     impl Button {
         pub fn on_click(on_click: Triggerable) -> Button {
             Self::builder().on_click(on_click).build()
+        }
+
+        pub fn interactions<S: Receiver<Message = ButtonMessage>>(
+            state: &State<ButtonMessage, S>,
+        ) -> Button {
+            Self::builder()
+                .on_click(state.then_send(ButtonMessage::Clicked(0, 0)))
+                .build()
         }
     }
 

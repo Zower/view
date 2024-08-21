@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [workspace]
+members = ["view-macros"]
 
 [dependencies]
 bevy_reflect = "0.14.1"
@@ -32,6 +33,7 @@ lsp-types.workspace = true
 miette.workspace = true
 taffy = "0.5.2"
 const_format = "0.2.32"
+view-macros = { version = "0.1.0", path = "view-macros" }
 
 [workspace.dependencies]
 tree-sitter = "0.22.2"

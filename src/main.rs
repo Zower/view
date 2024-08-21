@@ -1,12 +1,12 @@
-use bevy_reflect::{GetTypeRegistration, Reflect, TypeRegistry};
-use view::{hstack, run, Button, Element, IntoElement, Message, ReflectView, State, Text, View};
+use bevy_reflect::{GetTypeRegistration, Reflect};
+use view::{hstack, run, Button, ButtonMessage, Element, IntoElement, Receiver, State, Text, View};
+use view_macros::{view, Register};
 
 fn main() -> view::Result<()> {
     run(Root)
 }
 
-#[derive(Reflect)]
-#[reflect(View)]
+#[view]
 struct Root;
 
 impl View for Root {
@@ -16,17 +16,11 @@ impl View for Root {
         }
         .into()
     }
-
-    fn register(&self, registry: &mut TypeRegistry) {
-        registry.register::<Self>();
-        Self::register_type_dependencies(registry);
-    }
 }
 
-#[derive(Reflect)]
-#[reflect(View)]
+#[view]
 struct MyView {
-    state: State<MyViewState, MyViewMessage>,
+    state: State<ButtonMessage, MyViewState>,
 }
 
 impl View for MyView {
@@ -36,13 +30,8 @@ impl View for MyView {
                 MyViewState::False => MySecondView::default().element(),
                 MyViewState::True(data) => PlusOne(data).element(),
             },
-            Button::on_click(self.state.then_send(MyViewMessage::Change)),
+            Button::interactions(&self.state),
         ))
-    }
-
-    fn register(&self, registry: &mut TypeRegistry) {
-        registry.register::<Self>();
-        Self::register_type_dependencies(registry);
     }
 }
 
@@ -52,65 +41,52 @@ enum MyViewState {
     True(u32),
 }
 
-#[derive(Reflect, Debug, Clone)]
-enum MyViewMessage {
-    Change,
-}
+impl Receiver for MyViewState {
+    type Message = ButtonMessage;
 
-impl Message for MyViewMessage {
-    type State = MyViewState;
-
-    fn reduce(self, state: &mut Self::State) {
-        match self {
-            MyViewMessage::Change => {
-                *state = match state {
+    fn reduce(&mut self, message: Self::Message) {
+        match message {
+            ButtonMessage::Clicked(_, _) => {
+                *self = match self {
                     MyViewState::False => MyViewState::True(0),
                     MyViewState::True(_) => MyViewState::False,
-                }
+                };
             }
         }
     }
 }
 
-#[derive(Reflect, Debug, Clone)]
-enum MySecondViewMessage {
-    Clicked,
-}
+#[derive(Reflect, Default)]
+struct MySecondViewState(u32);
 
-impl Message for MySecondViewMessage {
-    type State = u32;
+impl Receiver for MySecondViewState {
+    type Message = ButtonMessage;
 
-    fn reduce(self, state: &mut Self::State) {
-        match self {
-            MySecondViewMessage::Clicked => *state += 1,
+    fn reduce(&mut self, message: Self::Message) {
+        match message {
+            ButtonMessage::Clicked(_, _) => self.0 += 1,
         }
     }
 }
 
-#[derive(Reflect, Default, Debug)]
-#[reflect(View)]
+#[view]
+#[derive(Default)]
 struct MySecondView {
-    state: State<u32, MySecondViewMessage>,
+    state: State<ButtonMessage, MySecondViewState>,
 }
 
 impl View for MySecondView {
     fn build(&self) -> Element {
         hstack((
             // Text::builder().text("Hey from second!").build(),
-            Text::builder().text(format!("{}", *self.state)).build(),
-            Button::on_click(self.state.then_send(MySecondViewMessage::Clicked)),
-            PlusOne(*self.state + 1),
+            Text::builder().text(format!("{}", self.state.0)).build(),
+            Button::interactions(&self.state),
+            PlusOne(self.state.0 + 1),
         ))
-    }
-
-    fn register(&self, registry: &mut TypeRegistry) {
-        registry.register::<Self>();
-        Self::register_type_dependencies(registry);
     }
 }
 
-#[derive(Reflect, Default, Debug)]
-#[reflect(View)]
+#[view]
 struct PlusOne(u32);
 
 impl View for PlusOne {
@@ -120,10 +96,5 @@ impl View for PlusOne {
             Text::builder().text(format!("{}", self.0)).build(),
             Text::builder().text(format!("{}", self.0)).build(),
         ))
-    }
-
-    fn register(&self, registry: &mut TypeRegistry) {
-        registry.register::<Self>();
-        Self::register_type_dependencies(registry);
     }
 }

@@ -21,9 +21,6 @@ pub struct App<V> {
     view: V,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct ViewId(ParsedPath);
-
 #[derive(Debug)]
 pub enum AppEvent {
     Clicked(u32, u32),

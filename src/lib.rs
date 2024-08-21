@@ -1,9 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use app::App;
-use bevy_reflect::{
-    reflect_trait, GetPath, GetTypeRegistration, Reflect, TypeData, TypeRegistration, TypeRegistry,
-};
+use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, Reflect, TypeRegistry};
 
 mod app;
 mod elements;
@@ -11,6 +9,9 @@ pub mod patch;
 mod runner;
 mod start;
 mod text;
+mod utils;
+
+pub use utils::*;
 
 use cosmic_text::FontSystem;
 pub use elements::*;
@@ -46,8 +47,11 @@ pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
 }
 
 #[reflect_trait]
-pub trait View: Reflect {
+pub trait View: Register {
     fn build(&self) -> Element;
+}
+
+pub trait Register: Reflect {
     fn register(&self, registry: &mut TypeRegistry);
 }
 
@@ -84,15 +88,15 @@ pub(crate) trait StateTrait {
     fn process(&mut self);
 }
 
-pub trait Message {
-    type State;
+pub trait Receiver {
+    type Message;
 
-    fn reduce(self, state: &mut Self::State);
+    fn reduce(&mut self, message: Self::Message);
 }
 
 #[derive(Reflect, Debug, Clone)]
 #[reflect(StateTrait)]
-pub struct State<S: 'static, M: Message<State = S> + Clone + 'static> {
+pub struct State<M: Clone + 'static, S: Receiver<Message = M> + 'static> {
     #[reflect(ignore)]
     state: Option<S>,
     #[reflect(ignore)]
@@ -102,18 +106,22 @@ pub struct State<S: 'static, M: Message<State = S> + Clone + 'static> {
     create_state: fn() -> S,
 }
 
+pub(crate) trait Message: Clone + 'static {}
+
+impl<T: Clone + 'static> Message for T {}
+
 fn create_state_fake<S>() -> fn() -> S {
     panic!()
 }
 
-impl<S: 'static, M: Message<State = S> + Clone + 'static> StateTrait for State<S, M> {
+impl<M: Message, S: Receiver<Message = M> + 'static> StateTrait for State<M, S> {
     fn is_dirty(&self) -> bool {
         !self.inner.rx.is_empty()
     }
 
     fn process(&mut self) {
         while let Some(message) = self.recv() {
-            message.reduce(self.deref_mut())
+            self.deref_mut().reduce(message);
         }
     }
 
@@ -128,7 +136,7 @@ impl<S: 'static, M: Message<State = S> + Clone + 'static> StateTrait for State<S
     }
 }
 
-impl<S, M: Message<State = S> + Clone + 'static> Deref for State<S, M> {
+impl<M: Message, S: Receiver<Message = M> + 'static> Deref for State<M, S> {
     type Target = S;
 
     fn deref(&self) -> &Self::Target {
@@ -136,13 +144,13 @@ impl<S, M: Message<State = S> + Clone + 'static> Deref for State<S, M> {
     }
 }
 
-impl<S, M: Message<State = S> + Clone + 'static> DerefMut for State<S, M> {
+impl<M: Message, S: Receiver<Message = M> + 'static> DerefMut for State<M, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.state.as_mut().unwrap()
     }
 }
 
-impl<S: Default, M: Message<State = S> + Clone + 'static> Default for State<S, M> {
+impl<M: Message, S: Default + Receiver<Message = M> + 'static> Default for State<M, S> {
     fn default() -> Self {
         Self {
             inner: MessageInner::default(),
@@ -165,7 +173,7 @@ impl<M> Default for MessageInner<M> {
     }
 }
 
-impl<S, M: Message<State = S> + Clone + 'static> State<S, M> {
+impl<M: Clone + 'static, S: Receiver<Message = M>> State<M, S> {
     pub fn create_state(f: fn() -> S) -> Self {
         Self {
             inner: MessageInner::default(),
