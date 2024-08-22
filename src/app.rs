@@ -1,18 +1,15 @@
 use std::{
     collections::{HashMap, VecDeque},
-    hash::Hash,
-    mem,
-    ops::Deref,
-    usize,
+    mem, usize,
 };
 
-use bevy_reflect::{GetTypeRegistration, ParsedPath, Reflect, TypeRegistry};
+use bevy_reflect::{GetTypeRegistration, Reflect, TypeRegistry};
 use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
 use crate::{
     Canvas, Element, Layout, MountableElement, MountedElementBehaviour, Point, RebuildResult,
-    ReflectStateTrait, ReflectView, View, ViewElement,
+    ReflectStateTrait, TodoRemoveElementWithChildrenVec, View, ViewElement,
 };
 
 pub struct App<V> {
@@ -142,19 +139,6 @@ impl<V: View> App<V> {
     }
 }
 
-fn iter_views(tree: &ElementTree, from: NodeId) -> impl Iterator<Item = &dyn View> {
-    fn what(b: &Box<dyn View>) -> &dyn View {
-        let b_ref: &dyn View = b.deref();
-
-        b_ref
-    }
-
-    iter_elements(&tree.taffy, from).filter_map(|it| match &tree.elements[&it.1] {
-        MountableElement::View(view) => Some(what(&view.0)),
-        _ => None,
-    })
-}
-
 fn iter_elements<'a>(
     taffy: &'a TaffyTree,
     from: NodeId,
@@ -235,24 +219,8 @@ pub(crate) fn iter_fields(of: &mut dyn Reflect, mut f: impl FnMut(usize, &mut dy
         }
     }
 }
-fn reflect_view_or_panic<'a>(registry: &TypeRegistry, view: &'a dyn Reflect) -> &'a dyn View {
-    let reflect_view = registry
-        .get_type_data::<ReflectView>(view.type_id())
-        .unwrap();
-    reflect_view.get(view).unwrap()
-}
 
-fn reflect_view_mut_or_panic<'a>(
-    registry: &TypeRegistry,
-    view: &'a mut dyn Reflect,
-) -> &'a mut dyn View {
-    let reflect_view = registry
-        .get_type_data::<ReflectView>(view.type_id())
-        .unwrap();
-    reflect_view.get_mut(view).unwrap()
-}
-
-struct ElementTree {
+pub struct ElementTree {
     // Also holds parent, child information
     taffy: TaffyTree,
     elements: HashMap<NodeId, MountableElement>,
@@ -264,7 +232,7 @@ impl ElementTree {
         Self::create_internal(registry, root_item.build())
     }
 
-    fn create_internal(registry: &mut TypeRegistry, element: Element) -> Self {
+    fn create_internal(registry: &mut TypeRegistry, element: impl Element) -> Self {
         let mut taffy = TaffyTree::default();
         let elements = HashMap::default();
 
@@ -312,19 +280,19 @@ impl ElementTree {
             panic!()
         };
 
-        self.comp_exchange(changed, view.build(), registry);
+        // self.comp_exchange(changed, view.build(), registry);
     }
 
     fn comp_exchange(
         &mut self,
         view_id: NodeId,
-        new_element: Element,
+        new_element: TodoRemoveElementWithChildrenVec,
         registry: &mut TypeRegistry,
     ) {
         fn iter_elements_cmp(
             tree: &mut ElementTree,
             processing: NodeId,
-            mut new_element_at_position: Element,
+            mut new_element_at_position: TodoRemoveElementWithChildrenVec,
             // other_parent: NodeId,
             // other: &mutElementTree,
             registry: &mut TypeRegistry,
@@ -391,7 +359,7 @@ impl ElementTree {
                 mount_children(registry, tree, parent, new_element_at_position, Some(idx));
             } else {
                 if let MountableElement::View(view) = new_mountable_element {
-                    new_element_at_position.children = Some(vec![view.0.build()]);
+                    // new_element_at_position.children = Some(vec![view.0.build()]);
                 }
 
                 // todo update style??
@@ -423,17 +391,18 @@ impl ElementTree {
     }
 }
 
-fn mount_children(
+fn mount_children<T: Element>(
     registry: &mut TypeRegistry,
     tree: &mut ElementTree,
     parent: NodeId,
-    element: Element,
+    element: T,
     idx: Option<usize>,
 ) {
-    let Element {
-        mut el,
-        mut children,
-    } = element;
+    // let Element {
+    //     mut el,
+    //     mut children,
+    // } = element;
+    let (mut el, children) = element.consume();
 
     if let MountableElement::View(view) = &mut el {
         view.0.register(registry);
@@ -450,7 +419,7 @@ fn mount_children(
             }
         });
 
-        children = Some(vec![view.0.build()]);
+        // children = Some(vec![view.0.build()]);
     }
 
     let id = if let Some(idx) = idx {
@@ -459,9 +428,8 @@ fn mount_children(
         tree.insert(el, parent)
     };
 
-    if let Some(children) = children {
-        for child in children {
-            mount_children(registry, tree, id, child, None);
-        }
-    }
+    T::convert(children, registry, tree, id, None)
+    // T::convert(children, |child| {
+    //     mount_children(registry, tree, id, child, None);
+    // });
 }

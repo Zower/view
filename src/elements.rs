@@ -11,10 +11,10 @@ pub use stack::*;
 use taffy::prelude::auto;
 pub use text::*;
 
-use crate::{app::iter_fields, Canvas, ReflectStateTrait, View};
+use crate::{app::iter_fields, Canvas, Element, ReflectStateTrait, View};
 
 #[enum_delegate::register]
-pub(crate) trait MountedElementBehaviour {
+pub trait MountedElementBehaviour {
     #[allow(unused_variables)]
     fn event(&mut self, event: ElementEvent) {}
 
@@ -33,7 +33,25 @@ pub(crate) trait MountedElementBehaviour {
         Self: Sized;
 }
 
-pub(crate) enum RebuildResult {
+impl Element for TodoRemoveElementWithChildrenVec {
+    type Children = Option<Vec<TodoRemoveElementWithChildrenVec>>;
+
+    fn consume(self) -> (impl Element, Self::Children) {
+        (self.el, self.children)
+    }
+
+    fn convert(
+        children: Self::Children,
+        registry: &mut TypeRegistry,
+        tree: &mut crate::app::ElementTree,
+        parent: taffy::NodeId,
+        idx: Option<usize>,
+    ) {
+        todo!()
+    }
+}
+
+pub enum RebuildResult {
     Rebuilt,
     Replace,
 }
@@ -53,6 +71,7 @@ impl MountedElementBehaviour for ViewElement {
             if let Some(reflect_state) =
                 registry.get_type_data::<ReflectStateTrait>(field.type_id())
             {
+                // todo uggly
                 if let Some(state) = reflect_state.get_mut(field) {
                     if let ReflectMut::Struct(st) = old.0.reflect_mut() {
                         state.reuse(st.field_at_mut(index).unwrap());
@@ -72,7 +91,7 @@ impl MountedElementBehaviour for ViewElement {
 
 #[derive(Debug)]
 #[enum_delegate::implement(MountedElementBehaviour)]
-pub(crate) enum MountableElement {
+pub enum MountableElement {
     Button(Button),
     Text(Text),
     HStack(HStack),
@@ -80,20 +99,20 @@ pub(crate) enum MountableElement {
 }
 
 #[derive(Debug)]
-pub struct Element {
+pub struct TodoRemoveElementWithChildrenVec {
     pub(crate) el: MountableElement,
-    pub(crate) children: Option<Vec<Element>>,
+    pub(crate) children: Option<Vec<TodoRemoveElementWithChildrenVec>>,
 }
 
-impl Element {
+impl TodoRemoveElementWithChildrenVec {
     pub(crate) fn no_children(el: MountableElement) -> Self {
         Self { el, children: None }
     }
 }
 
-impl<V: View> From<V> for Element {
+impl<V: View> From<V> for TodoRemoveElementWithChildrenVec {
     fn from(value: V) -> Self {
-        Element {
+        TodoRemoveElementWithChildrenVec {
             el: MountableElement::View(ViewElement(Box::new(value))),
             children: None,
         }
@@ -135,7 +154,9 @@ mod button {
 
     use crate::{ButtonMessage, Color, Layout, Receiver, State, Triggerable};
 
-    use super::{Element, ElementEvent, MountedElementBehaviour, RebuildResult};
+    use super::{
+        ElementEvent, MountedElementBehaviour, RebuildResult, TodoRemoveElementWithChildrenVec,
+    };
 
     #[builder]
     pub struct Button {
@@ -156,9 +177,9 @@ mod button {
         }
     }
 
-    impl From<Button> for Element {
+    impl From<Button> for TodoRemoveElementWithChildrenVec {
         fn from(value: Button) -> Self {
-            Element::no_children(value.into())
+            TodoRemoveElementWithChildrenVec::no_children(value.into())
         }
     }
 
@@ -209,7 +230,7 @@ mod text {
     use bon::bon;
     use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, Metrics};
 
-    use super::{Element, MountedElementBehaviour, RebuildResult};
+    use super::{MountedElementBehaviour, RebuildResult, TodoRemoveElementWithChildrenVec};
 
     #[derive(Debug)]
     pub struct Text {
@@ -227,13 +248,13 @@ mod text {
             wrap: Option<cosmic_text::Wrap>,
             font: Option<&'static str>,
             size: Option<f32>,
-        ) -> Element {
+        ) -> TodoRemoveElementWithChildrenVec {
             let size = size.unwrap_or(25.);
             let attrs = Attrs::new()
                 .color(color.unwrap_or_default().into())
                 .family(cosmic_text::Family::Name(font.unwrap_or("JetBrains Mono")));
 
-            Element {
+            TodoRemoveElementWithChildrenVec {
                 el: super::MountableElement::Text(Self {
                     unused_text: Some(vec![(text.into(), AttrsList::new(attrs))]),
                     buffer: Buffer::new_empty(Metrics::new(size, size)),
@@ -244,9 +265,9 @@ mod text {
         }
     }
 
-    impl From<Text> for Element {
+    impl From<Text> for TodoRemoveElementWithChildrenVec {
         fn from(value: Text) -> Self {
-            Element::no_children(value.into())
+            TodoRemoveElementWithChildrenVec::no_children(value.into())
         }
     }
 
@@ -310,7 +331,9 @@ mod text {
 mod stack {
     use bevy_reflect::TypeRegistry;
 
-    use super::{ChildView, Element, MountedElementBehaviour, RebuildResult};
+    use super::{
+        ChildView, MountedElementBehaviour, RebuildResult, TodoRemoveElementWithChildrenVec,
+    };
 
     #[derive(Debug)]
     pub struct HStack;
@@ -328,8 +351,8 @@ mod stack {
         }
     }
 
-    pub fn hstack<F>(child: impl ChildView<F>) -> Element {
-        Element {
+    pub fn hstack<F>(child: impl ChildView<F>) -> TodoRemoveElementWithChildrenVec {
+        TodoRemoveElementWithChildrenVec {
             el: HStack.into(),
             children: Some(child.to_element_vec()),
         }
@@ -337,29 +360,36 @@ mod stack {
 }
 
 pub trait ChildView<F> {
-    fn to_element_vec(self) -> Vec<Element>;
+    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec>;
 }
 
-impl<A: Into<Element>> ChildView<(A,)> for A {
-    fn to_element_vec(self) -> Vec<Element> {
+impl<A: Into<TodoRemoveElementWithChildrenVec>> ChildView<(A,)> for A {
+    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec> {
         vec![self.into()]
     }
 }
 
-impl<A: Into<Element>> ChildView<(A,)> for (A,) {
-    fn to_element_vec(self) -> Vec<Element> {
+impl<A: Into<TodoRemoveElementWithChildrenVec>> ChildView<(A,)> for (A,) {
+    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec> {
         vec![self.0.into()]
     }
 }
 
-impl<A: Into<Element>, B: Into<Element>> ChildView<(A, B)> for (A, B) {
-    fn to_element_vec(self) -> Vec<Element> {
+impl<A: Into<TodoRemoveElementWithChildrenVec>, B: Into<TodoRemoveElementWithChildrenVec>>
+    ChildView<(A, B)> for (A, B)
+{
+    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec> {
         vec![self.0.into(), self.1.into()]
     }
 }
 
-impl<A: Into<Element>, B: Into<Element>, C: Into<Element>> ChildView<(A, B, C)> for (A, B, C) {
-    fn to_element_vec(self) -> Vec<Element> {
+impl<
+        A: Into<TodoRemoveElementWithChildrenVec>,
+        B: Into<TodoRemoveElementWithChildrenVec>,
+        C: Into<TodoRemoveElementWithChildrenVec>,
+    > ChildView<(A, B, C)> for (A, B, C)
+{
+    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec> {
         vec![self.0.into(), self.1.into(), self.2.into()]
     }
 }

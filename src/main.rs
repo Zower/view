@@ -10,11 +10,10 @@ fn main() -> view::Result<()> {
 struct Root;
 
 impl View for Root {
-    fn build(&self) -> Element {
+    fn build(&self) -> impl Element {
         MyView {
             state: State::create_state(|| MyViewState::False),
         }
-        .into()
     }
 }
 
@@ -24,7 +23,7 @@ struct MyView {
 }
 
 impl View for MyView {
-    fn build(&self) -> Element {
+    fn build(&self) -> impl Element {
         hstack((
             match *self.state {
                 MyViewState::False => MySecondView::default().element(),
@@ -76,7 +75,7 @@ struct MySecondView {
 }
 
 impl View for MySecondView {
-    fn build(&self) -> Element {
+    fn build(&self) -> impl Element {
         hstack((
             // Text::builder().text("Hey from second!").build(),
             Text::builder().text(format!("{}", self.state.0)).build(),
@@ -90,7 +89,7 @@ impl View for MySecondView {
 struct PlusOne(u32);
 
 impl View for PlusOne {
-    fn build(&self) -> Element {
+    fn build(&self) -> impl Element {
         hstack((
             Text::builder().text(format!("{}", self.0)).build(),
             Text::builder().text(format!("{}", self.0)).build(),

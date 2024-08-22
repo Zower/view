@@ -11,6 +11,7 @@ mod start;
 mod text;
 mod utils;
 
+use taffy::NodeId;
 pub use utils::*;
 
 use cosmic_text::FontSystem;
@@ -46,9 +47,58 @@ pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
     .run(app)
 }
 
-#[reflect_trait]
+struct IntoElementView<T>(T);
+
+impl<T: View> From<IntoElementView<T>> for MountableElement {
+    fn from(value: IntoElementView<T>) -> Self {
+        MountableElement::View(ViewElement(Box::new(value.0)))
+    }
+}
+
+impl<T: View> Element for T {
+    type Children = TodoRemoveElementWithChildrenVec;
+    fn consume(self) -> (IntoElementView<Self>, Self::Children) {
+        todo!()
+        // (
+        //     MountableElement::View(ViewElement(Box::new(self))),
+        //     self.build().become_element(),
+        // )
+    }
+
+    fn convert(
+        children: Self::Children,
+        registry: &mut TypeRegistry,
+        tree: &mut app::ElementTree,
+        parent: NodeId,
+        idx: Option<usize>,
+    ) {
+        todo!()
+    }
+}
+
+pub trait Element {
+    type Children;
+
+    fn consume(self) -> (impl Into<MountableElement>, Self::Children);
+    fn convert(
+        children: Self::Children,
+        registry: &mut TypeRegistry,
+        tree: &mut app::ElementTree,
+        parent: NodeId,
+        idx: Option<usize>,
+    );
+}
+
+// impl<T: Into<MountableElement>> BecomeElement for T {
+//     fn into(self) -> impl MountedElementBehaviour {
+//         self.into()
+//     }
+// }
+
 pub trait View: Register {
-    fn build(&self) -> Element;
+    fn build(&self) -> impl Element
+    where
+        Self: Sized;
 }
 
 pub trait Register: Reflect {
@@ -318,11 +368,11 @@ impl From<Color> for femtovg::Color {
 }
 
 pub trait IntoElement {
-    fn element(self) -> Element;
+    fn element(self) -> TodoRemoveElementWithChildrenVec;
 }
 
-impl<T: Into<Element>> IntoElement for T {
-    fn element(self) -> Element {
+impl<T: Into<TodoRemoveElementWithChildrenVec>> IntoElement for T {
+    fn element(self) -> TodoRemoveElementWithChildrenVec {
         self.into()
     }
 }
