@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use app::App;
 use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, Reflect, TypeRegistry};
 
-mod app;
+pub mod app;
 mod elements;
 pub mod patch;
 mod runner;
@@ -47,46 +47,93 @@ pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
     .run(app)
 }
 
-struct IntoElementView<T>(T);
-
-impl<T: View> From<IntoElementView<T>> for MountableElement {
-    fn from(value: IntoElementView<T>) -> Self {
-        MountableElement::View(ViewElement(Box::new(value.0)))
-    }
-}
-
 impl<T: View> Element for T {
-    type Children = TodoRemoveElementWithChildrenVec;
-    fn consume(self) -> (IntoElementView<Self>, Self::Children) {
-        todo!()
-        // (
-        //     MountableElement::View(ViewElement(Box::new(self))),
-        //     self.build().become_element(),
-        // )
+    fn insert_perform_per_child(mut self, mut per_child: impl PerChildElementThingy) {
+        dbg!("--------------------------------------- ALLOC -----------------------------------");
+        self.register(per_child.registry());
+
+        app::iter_fields(self.as_reflect_mut(), |_, field| {
+            if let Some(reflect_state) = per_child
+                .registry()
+                .get_type_data::<ReflectStateTrait>(field.type_id())
+            {
+                let Some(state) = reflect_state.get_mut(field) else {
+                    return;
+                };
+
+                state.init()
+            }
+        });
+
+        let built = self.build();
+
+        let boxed = ViewElement(Box::new(self)).into();
+
+        let id = per_child.insert(boxed);
+        per_child.dothething(built, id);
+
+        // mount_children(registry, tree, id, built, idx)
     }
 
-    fn convert(
-        children: Self::Children,
-        registry: &mut TypeRegistry,
-        tree: &mut app::ElementTree,
-        parent: NodeId,
-        idx: Option<usize>,
-    ) {
-        todo!()
+    fn try_reuse(&mut self, old: MountableElement, registry: &TypeRegistry) -> RebuildResult
+    where
+        Self: Sized,
+    {
+        let MountableElement::View(mut view) = old else {
+            return RebuildResult::Replace;
+        };
+
+        if self.type_id() != view.0.type_id() {
+            return RebuildResult::Replace;
+        }
+
+        app::iter_fields(self.as_reflect_mut(), |index, field| {
+            if let Some(reflect_state) =
+                registry.get_type_data::<ReflectStateTrait>(field.type_id())
+            {
+                // todo uggly
+                if let Some(state) = reflect_state.get_mut(field) {
+                    if let bevy_reflect::ReflectMut::Struct(st) = view.0.reflect_mut() {
+                        state.reuse(st.field_at_mut(index).unwrap());
+                    } else if let bevy_reflect::ReflectMut::Enum(en) = view.0.reflect_mut() {
+                        panic!();
+                        // state.reuse(en.field_at_mut(index).unwrap());
+                    } else {
+                        panic!()
+                    }
+                }
+            }
+        });
+
+        RebuildResult::Rebuilt
     }
 }
 
-pub trait Element {
-    type Children;
+pub trait PerChildElementThingy {
+    fn dothething<E: Element>(&mut self, e: E, parent: NodeId);
+    fn insert(&mut self, m: MountableElement) -> NodeId;
+    fn registry(&mut self) -> &mut TypeRegistry;
+}
 
-    fn consume(self) -> (impl Into<MountableElement>, Self::Children);
-    fn convert(
-        children: Self::Children,
-        registry: &mut TypeRegistry,
+pub trait Element: 'static {
+    fn insert_perform_per_child(self, context: impl PerChildElementThingy);
+
+    fn try_reuse(&mut self, old: MountableElement, registry: &TypeRegistry) -> RebuildResult
+    where
+        Self: Sized;
+
+    fn just_spawn(
         tree: &mut app::ElementTree,
         parent: NodeId,
         idx: Option<usize>,
-    );
+        element: MountableElement,
+    ) {
+        if let Some(idx) = idx {
+            tree.insert_at(element, parent, idx)
+        } else {
+            tree.insert(element, parent)
+        };
+    }
 }
 
 // impl<T: Into<MountableElement>> BecomeElement for T {
@@ -95,14 +142,15 @@ pub trait Element {
 //     }
 // }
 
-pub trait View: Register {
+pub trait View: DynView {
     fn build(&self) -> impl Element
     where
         Self: Sized;
 }
 
-pub trait Register: Reflect {
+pub trait DynView: Reflect {
     fn register(&self, registry: &mut TypeRegistry);
+    fn dyn_cmp(&self, child_id: NodeId, tree: &mut app::ElementTree, registry: &mut TypeRegistry);
 }
 
 pub struct Canvas {
@@ -138,15 +186,13 @@ pub(crate) trait StateTrait {
     fn process(&mut self);
 }
 
-pub trait Receiver {
-    type Message;
-
-    fn reduce(&mut self, message: Self::Message);
+pub trait Reducer<M> {
+    fn reduce(&mut self, message: M);
 }
 
 #[derive(Reflect, Debug, Clone)]
 #[reflect(StateTrait)]
-pub struct State<M: Clone + 'static, S: Receiver<Message = M> + 'static> {
+pub struct State<M: Clone + 'static, S: Reducer<M> + 'static> {
     #[reflect(ignore)]
     state: Option<S>,
     #[reflect(ignore)]
@@ -164,7 +210,7 @@ fn create_state_fake<S>() -> fn() -> S {
     panic!()
 }
 
-impl<M: Message, S: Receiver<Message = M> + 'static> StateTrait for State<M, S> {
+impl<M: Message, S: Reducer<M> + 'static> StateTrait for State<M, S> {
     fn is_dirty(&self) -> bool {
         !self.inner.rx.is_empty()
     }
@@ -186,7 +232,7 @@ impl<M: Message, S: Receiver<Message = M> + 'static> StateTrait for State<M, S> 
     }
 }
 
-impl<M: Message, S: Receiver<Message = M> + 'static> Deref for State<M, S> {
+impl<M: Message, S: Reducer<M> + 'static> Deref for State<M, S> {
     type Target = S;
 
     fn deref(&self) -> &Self::Target {
@@ -194,13 +240,13 @@ impl<M: Message, S: Receiver<Message = M> + 'static> Deref for State<M, S> {
     }
 }
 
-impl<M: Message, S: Receiver<Message = M> + 'static> DerefMut for State<M, S> {
+impl<M: Message, S: Reducer<M> + 'static> DerefMut for State<M, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.state.as_mut().unwrap()
     }
 }
 
-impl<M: Message, S: Default + Receiver<Message = M> + 'static> Default for State<M, S> {
+impl<M: Message, S: Default + Reducer<M> + 'static> Default for State<M, S> {
     fn default() -> Self {
         Self {
             inner: MessageInner::default(),
@@ -223,7 +269,7 @@ impl<M> Default for MessageInner<M> {
     }
 }
 
-impl<M: Clone + 'static, S: Receiver<Message = M>> State<M, S> {
+impl<M: Clone + 'static, S: Reducer<M>> State<M, S> {
     pub fn create_state(f: fn() -> S) -> Self {
         Self {
             inner: MessageInner::default(),
@@ -364,15 +410,5 @@ impl From<Color> for cosmic_text::Color {
 impl From<Color> for femtovg::Color {
     fn from(value: Color) -> Self {
         value.0
-    }
-}
-
-pub trait IntoElement {
-    fn element(self) -> TodoRemoveElementWithChildrenVec;
-}
-
-impl<T: Into<TodoRemoveElementWithChildrenVec>> IntoElement for T {
-    fn element(self) -> TodoRemoveElementWithChildrenVec {
-        self.into()
     }
 }

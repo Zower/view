@@ -1,6 +1,7 @@
-use core::panic;
 use std::{
     fmt::Debug,
+    marker::PhantomData,
+    mem,
     ops::{Deref, DerefMut},
 };
 
@@ -8,10 +9,13 @@ use bevy_reflect::{ReflectMut, TypeRegistry};
 pub use button::*;
 pub use stack::HStack;
 pub use stack::*;
-use taffy::prelude::auto;
+use taffy::{prelude::auto, NodeId};
 pub use text::*;
 
-use crate::{app::iter_fields, Canvas, Element, ReflectStateTrait, View};
+use crate::{
+    app::{iter_fields, mount_children},
+    Canvas, Element, PerChildElementThingy, ReflectStateTrait, View,
+};
 
 #[enum_delegate::register]
 pub trait MountedElementBehaviour {
@@ -27,28 +31,6 @@ pub trait MountedElementBehaviour {
 
     #[allow(unused_variables)]
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
-
-    fn try_reuse(&mut self, old: Self, registry: &TypeRegistry) -> RebuildResult
-    where
-        Self: Sized;
-}
-
-impl Element for TodoRemoveElementWithChildrenVec {
-    type Children = Option<Vec<TodoRemoveElementWithChildrenVec>>;
-
-    fn consume(self) -> (impl Element, Self::Children) {
-        (self.el, self.children)
-    }
-
-    fn convert(
-        children: Self::Children,
-        registry: &mut TypeRegistry,
-        tree: &mut crate::app::ElementTree,
-        parent: taffy::NodeId,
-        idx: Option<usize>,
-    ) {
-        todo!()
-    }
 }
 
 pub enum RebuildResult {
@@ -58,36 +40,7 @@ pub enum RebuildResult {
 
 pub struct ViewElement(pub(crate) Box<dyn View>);
 
-impl MountedElementBehaviour for ViewElement {
-    fn try_reuse(&mut self, mut old: Self, registry: &TypeRegistry) -> RebuildResult
-    where
-        Self: Sized,
-    {
-        if self.0.type_id() != old.0.type_id() {
-            return RebuildResult::Replace;
-        }
-
-        iter_fields(self.0.as_reflect_mut(), |index, field| {
-            if let Some(reflect_state) =
-                registry.get_type_data::<ReflectStateTrait>(field.type_id())
-            {
-                // todo uggly
-                if let Some(state) = reflect_state.get_mut(field) {
-                    if let ReflectMut::Struct(st) = old.0.reflect_mut() {
-                        state.reuse(st.field_at_mut(index).unwrap());
-                    } else if let ReflectMut::Enum(en) = old.0.reflect_mut() {
-                        panic!();
-                        // state.reuse(en.field_at_mut(index).unwrap());
-                    } else {
-                        panic!()
-                    }
-                }
-            }
-        });
-
-        RebuildResult::Rebuilt
-    }
-}
+impl MountedElementBehaviour for ViewElement {}
 
 #[derive(Debug)]
 #[enum_delegate::implement(MountedElementBehaviour)]
@@ -99,23 +52,48 @@ pub enum MountableElement {
 }
 
 #[derive(Debug)]
-pub struct TodoRemoveElementWithChildrenVec {
-    pub(crate) el: MountableElement,
-    pub(crate) children: Option<Vec<TodoRemoveElementWithChildrenVec>>,
+pub struct ElementAndChildren<El, Children, F> {
+    pub(crate) el: El,
+    pub(crate) children: Children,
+    phantom: PhantomData<F>,
 }
 
-impl TodoRemoveElementWithChildrenVec {
-    pub(crate) fn no_children(el: MountableElement) -> Self {
-        Self { el, children: None }
-    }
-}
+impl<
+        F: 'static,
+        El: Into<MountableElement> + Element + 'static,
+        Children: ChildView<F> + 'static,
+    > Element for ElementAndChildren<El, Children, F>
+{
+    fn insert_perform_per_child(self, mut context: impl PerChildElementThingy) {
+        let id = context.insert(self.el.into());
 
-impl<V: View> From<V> for TodoRemoveElementWithChildrenVec {
-    fn from(value: V) -> Self {
-        TodoRemoveElementWithChildrenVec {
-            el: MountableElement::View(ViewElement(Box::new(value))),
-            children: None,
+        struct TheBuilder<Pc: PerChildElementThingy> {
+            pc: Pc,
+            id: NodeId,
         }
+
+        impl<Pc: PerChildElementThingy> ChildViewFnBuilder for TheBuilder<Pc> {
+            fn build<E: Element>(&mut self) -> impl FnMut(E) {
+                |e| self.pc.dothething(e, self.id)
+            }
+        }
+
+        self.children.call_each(TheBuilder { pc: context, id });
+    }
+
+    fn try_reuse(&mut self, old: MountableElement, registry: &TypeRegistry) -> RebuildResult
+    where
+        Self: Sized,
+    {
+        self.el.try_reuse(old, registry)
+
+        // if mem::discriminant(&old) != mem::discriminant(&this) {
+        //     dbg!("NOT EQUAL");
+        //     RebuildResult::Replace
+        // } else {
+        // }
+
+        // todo!()
     }
 }
 
@@ -152,15 +130,30 @@ mod button {
     use bevy_reflect::TypeRegistry;
     use bon::builder;
 
-    use crate::{ButtonMessage, Color, Layout, Receiver, State, Triggerable};
+    use crate::{ButtonMessage, Color, Element, Layout, Reducer, State, Triggerable};
 
-    use super::{
-        ElementEvent, MountedElementBehaviour, RebuildResult, TodoRemoveElementWithChildrenVec,
-    };
+    use super::{ElementEvent, MountableElement, MountedElementBehaviour, RebuildResult};
 
     #[builder]
     pub struct Button {
         on_click: Triggerable,
+    }
+
+    impl Element for Button {
+        // fn insert_perform_per_child(self) {
+        // }
+
+        fn try_reuse(&mut self, old: MountableElement, registry: &TypeRegistry) -> RebuildResult
+        where
+            Self: Sized,
+        {
+            // que?
+            RebuildResult::Rebuilt
+        }
+
+        fn insert_perform_per_child(self, mut per_child: impl crate::PerChildElementThingy) {
+            per_child.insert(MountableElement::Button(self));
+        }
     }
 
     impl Button {
@@ -168,18 +161,10 @@ mod button {
             Self::builder().on_click(on_click).build()
         }
 
-        pub fn interactions<S: Receiver<Message = ButtonMessage>>(
-            state: &State<ButtonMessage, S>,
-        ) -> Button {
+        pub fn interactions<S: Reducer<ButtonMessage>>(state: &State<ButtonMessage, S>) -> Button {
             Self::builder()
                 .on_click(state.then_send(ButtonMessage::Clicked(0, 0)))
                 .build()
-        }
-    }
-
-    impl From<Button> for TodoRemoveElementWithChildrenVec {
-        fn from(value: Button) -> Self {
-            TodoRemoveElementWithChildrenVec::no_children(value.into())
         }
     }
 
@@ -211,18 +196,7 @@ mod button {
                 Color::rgb(200, 130, 90).into(),
             );
         }
-
-        fn try_reuse(&mut self, _: Self, _: &TypeRegistry) -> RebuildResult
-        where
-            Self: Sized,
-        {
-            RebuildResult::Rebuilt
-        }
     }
-
-    // pub fn button(on_click: Triggerable) -> Button {
-    // Button(on_click)
-    // }
 }
 
 mod text {
@@ -230,13 +204,33 @@ mod text {
     use bon::bon;
     use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, Metrics};
 
-    use super::{MountedElementBehaviour, RebuildResult, TodoRemoveElementWithChildrenVec};
+    use crate::{Element, PerChildElementThingy};
+
+    use super::{MountedElementBehaviour, RebuildResult};
 
     #[derive(Debug)]
     pub struct Text {
         unused_text: Option<Vec<(String, AttrsList)>>,
         wrap: cosmic_text::Wrap,
         buffer: cosmic_text::Buffer,
+    }
+
+    impl Element for Text {
+        fn insert_perform_per_child(self, mut context: impl PerChildElementThingy) {
+            context.insert(super::MountableElement::Text(self));
+        }
+
+        fn try_reuse(
+            &mut self,
+            old: super::MountableElement,
+            registry: &TypeRegistry,
+        ) -> RebuildResult
+        where
+            Self: Sized,
+        {
+            // que?
+            RebuildResult::Rebuilt
+        }
     }
 
     #[bon]
@@ -248,26 +242,17 @@ mod text {
             wrap: Option<cosmic_text::Wrap>,
             font: Option<&'static str>,
             size: Option<f32>,
-        ) -> TodoRemoveElementWithChildrenVec {
+        ) -> impl Element {
             let size = size.unwrap_or(25.);
             let attrs = Attrs::new()
                 .color(color.unwrap_or_default().into())
                 .family(cosmic_text::Family::Name(font.unwrap_or("JetBrains Mono")));
 
-            TodoRemoveElementWithChildrenVec {
-                el: super::MountableElement::Text(Self {
-                    unused_text: Some(vec![(text.into(), AttrsList::new(attrs))]),
-                    buffer: Buffer::new_empty(Metrics::new(size, size)),
-                    wrap: wrap.unwrap_or(cosmic_text::Wrap::Word),
-                }),
-                children: None,
+            Self {
+                unused_text: Some(vec![(text.into(), AttrsList::new(attrs))]),
+                buffer: Buffer::new_empty(Metrics::new(size, size)),
+                wrap: wrap.unwrap_or(cosmic_text::Wrap::Word),
             }
-        }
-    }
-
-    impl From<Text> for TodoRemoveElementWithChildrenVec {
-        fn from(value: Text) -> Self {
-            TodoRemoveElementWithChildrenVec::no_children(value.into())
         }
     }
 
@@ -318,79 +303,133 @@ mod text {
                 );
             }
         }
+    }
+}
 
-        fn try_reuse(&mut self, _: Self, _: &TypeRegistry) -> RebuildResult
+mod stack {
+    use std::marker::PhantomData;
+
+    use bevy_reflect::TypeRegistry;
+
+    use crate::Element;
+
+    use super::{ChildView, ElementAndChildren, MountedElementBehaviour, RebuildResult};
+
+    #[derive(Debug)]
+    pub struct HStack;
+
+    impl Element for HStack {
+        fn insert_perform_per_child(self, mut context: impl crate::PerChildElementThingy) {
+            context.insert(self.into());
+        }
+
+        fn try_reuse(
+            &mut self,
+            _old: super::MountableElement,
+            _registry: &TypeRegistry,
+        ) -> RebuildResult
         where
             Self: Sized,
         {
             RebuildResult::Rebuilt
         }
     }
-}
-
-mod stack {
-    use bevy_reflect::TypeRegistry;
-
-    use super::{
-        ChildView, MountedElementBehaviour, RebuildResult, TodoRemoveElementWithChildrenVec,
-    };
-
-    #[derive(Debug)]
-    pub struct HStack;
 
     impl MountedElementBehaviour for HStack {
         fn style(&self) -> super::Style {
             super::Style::default().with_direction(taffy::FlexDirection::Row)
         }
+    }
 
-        fn try_reuse(&mut self, _: Self, _: &TypeRegistry) -> RebuildResult
-        where
-            Self: Sized,
-        {
-            RebuildResult::Rebuilt
+    pub fn hstack<F, CV: ChildView<F>>(child: CV) -> ElementAndChildren<HStack, CV, F> {
+        ElementAndChildren {
+            el: HStack,
+            children: child,
+            phantom: PhantomData,
+        }
+    }
+}
+
+pub enum OneOf<A, B> {
+    A(A),
+    B(B),
+}
+
+impl<A: Element, B: Element> Element for OneOf<A, B> {
+    // fn (
+    //     self,
+    //     registry: &mut TypeRegistry,
+    //     tree: &mut crate::app::ElementTree,
+    //     parent: taffy::NodeId,
+    //     idx: Option<usize>,
+    // ) {
+    // }
+
+    fn try_reuse(&mut self, old: MountableElement, registry: &TypeRegistry) -> RebuildResult
+    where
+        Self: Sized,
+    {
+        match self {
+            OneOf::A(a) => a.try_reuse(old, registry),
+            OneOf::B(b) => b.try_reuse(old, registry),
         }
     }
 
-    pub fn hstack<F>(child: impl ChildView<F>) -> TodoRemoveElementWithChildrenVec {
-        TodoRemoveElementWithChildrenVec {
-            el: HStack.into(),
-            children: Some(child.to_element_vec()),
+    fn insert_perform_per_child(self, context: impl crate::PerChildElementThingy) {
+        match self {
+            OneOf::A(a) => a.insert_perform_per_child(context),
+            OneOf::B(b) => b.insert_perform_per_child(context),
         }
     }
+}
+
+pub trait OneOfSwizz<A> {
+    fn left<B>(self) -> OneOf<A, B>;
+    fn right<B>(self) -> OneOf<B, A>;
+}
+
+impl<El> OneOfSwizz<El> for El {
+    fn left<B>(self) -> OneOf<El, B> {
+        OneOf::A(self)
+    }
+
+    fn right<B>(self) -> OneOf<B, El> {
+        OneOf::B(self)
+    }
+}
+
+pub trait ChildViewFnBuilder {
+    fn build<E: Element>(&mut self) -> impl FnMut(E);
 }
 
 pub trait ChildView<F> {
-    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec>;
+    fn call_each(self, f: impl ChildViewFnBuilder);
 }
 
-impl<A: Into<TodoRemoveElementWithChildrenVec>> ChildView<(A,)> for A {
-    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec> {
-        vec![self.into()]
+impl<A: Element> ChildView<(A,)> for A {
+    fn call_each(self, mut f: impl ChildViewFnBuilder) {
+        f.build()(self)
     }
 }
 
-impl<A: Into<TodoRemoveElementWithChildrenVec>> ChildView<(A,)> for (A,) {
-    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec> {
-        vec![self.0.into()]
+impl<A: Element> ChildView<(A,)> for (A,) {
+    fn call_each(self, mut f: impl ChildViewFnBuilder) {
+        f.build()(self.0)
     }
 }
 
-impl<A: Into<TodoRemoveElementWithChildrenVec>, B: Into<TodoRemoveElementWithChildrenVec>>
-    ChildView<(A, B)> for (A, B)
-{
-    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec> {
-        vec![self.0.into(), self.1.into()]
+impl<A: Element, B: Element> ChildView<(A, B)> for (A, B) {
+    fn call_each(self, mut f: impl ChildViewFnBuilder) {
+        f.build()(self.0);
+        f.build()(self.1)
     }
 }
 
-impl<
-        A: Into<TodoRemoveElementWithChildrenVec>,
-        B: Into<TodoRemoveElementWithChildrenVec>,
-        C: Into<TodoRemoveElementWithChildrenVec>,
-    > ChildView<(A, B, C)> for (A, B, C)
-{
-    fn to_element_vec(self) -> Vec<TodoRemoveElementWithChildrenVec> {
-        vec![self.0.into(), self.1.into(), self.2.into()]
+impl<A: Element, B: Element, C: Element> ChildView<(A, B, C)> for (A, B, C) {
+    fn call_each(self, mut f: impl ChildViewFnBuilder) {
+        f.build()(self.0);
+        f.build()(self.1);
+        f.build()(self.2)
     }
 }
 

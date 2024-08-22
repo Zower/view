@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
-    mem, usize,
+    usize,
 };
 
 use bevy_reflect::{GetTypeRegistration, Reflect, TypeRegistry};
@@ -8,8 +8,8 @@ use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-    Canvas, Element, Layout, MountableElement, MountedElementBehaviour, Point, RebuildResult,
-    ReflectStateTrait, TodoRemoveElementWithChildrenVec, View, ViewElement,
+    Canvas, Element, ElementAndChildren, Layout, MountableElement, MountedElementBehaviour,
+    PerChildElementThingy, Point, RebuildResult, ReflectStateTrait, View, ViewElement,
 };
 
 pub struct App<V> {
@@ -276,122 +276,149 @@ impl ElementTree {
     }
 
     pub fn modify_if_necessary(&mut self, registry: &mut TypeRegistry, changed: NodeId) {
-        let Some(MountableElement::View(ViewElement(view))) = self.elements.get(&changed) else {
-            panic!()
-        };
-
-        // self.comp_exchange(changed, view.build(), registry);
+        self.comp_exchange(changed, registry);
     }
 
-    fn comp_exchange(
-        &mut self,
-        view_id: NodeId,
-        new_element: TodoRemoveElementWithChildrenVec,
-        registry: &mut TypeRegistry,
-    ) {
-        fn iter_elements_cmp(
-            tree: &mut ElementTree,
-            processing: NodeId,
-            mut new_element_at_position: TodoRemoveElementWithChildrenVec,
-            // other_parent: NodeId,
-            // other: &mutElementTree,
-            registry: &mut TypeRegistry,
-        ) {
-            let ElementTree {
-                taffy,
-                elements,
-                root,
-            } = tree;
-
-            let new_mountable_element = &mut new_element_at_position.el;
-
-            let element_at_current_position = elements.remove(&processing).unwrap();
-
-            if mem::discriminant(&element_at_current_position)
-                != mem::discriminant(&new_mountable_element)
-            {
-                let parent = taffy.parent(processing).unwrap();
-                let to_delete = iter_elements(&taffy, processing)
-                    .map(|it| it.1)
-                    .collect::<Vec<_>>();
-
-                let mut idx = 0;
-
-                while let false = taffy.child_at_index(parent, idx).unwrap() == processing {
-                    idx += 1;
-                }
-
-                taffy.remove(processing).unwrap();
-
-                for to_delete in to_delete {
-                    elements.remove(&to_delete).unwrap();
-                    let _ = taffy.remove(to_delete);
-                }
-
-                // todo this will lead to wrong position
-                mount_children(registry, tree, parent, new_element_at_position, Some(idx));
-
-                return;
-            }
-
-            if let RebuildResult::Replace =
-                new_mountable_element.try_reuse(element_at_current_position, registry)
-            {
-                let parent = taffy.parent(processing).unwrap();
-                let to_delete = iter_elements(&taffy, processing)
-                    .map(|it| it.1)
-                    .collect::<Vec<_>>();
-
-                for to_delete in to_delete {
-                    elements.remove(&to_delete).unwrap();
-                    let _ = taffy.remove(to_delete);
-                }
-
-                let mut idx = 0;
-
-                while let false = taffy.child_at_index(parent, idx).unwrap() == processing {
-                    idx += 1;
-                }
-
-                taffy.remove(processing).unwrap();
-
-                // todo this will lead to wrong position
-                mount_children(registry, tree, parent, new_element_at_position, Some(idx));
-            } else {
-                if let MountableElement::View(view) = new_mountable_element {
-                    // new_element_at_position.children = Some(vec![view.0.build()]);
-                }
-
-                // todo update style??
-                elements.insert(processing, new_element_at_position.el);
-
-                if let Some(children) = new_element_at_position.children {
-                    for (idx, child) in children.into_iter().enumerate() {
-                        let processing = tree.taffy.child_at_index(processing, idx).unwrap();
-                        iter_elements_cmp(tree, processing, child, registry);
-                    }
-                }
-            }
-
-            // for (idx, child) in taffy.children(parent).unwrap().into_iter().enumerate() {
-            //     let Ok(other_child) = other.taffy.child_at_index(other_parent, idx) else {
-            //         todo!()
-            //     };
-
-            //     let element = elements.get_mut(&child).unwrap();
-            //     let other_element = &other.elements[&other_child];
-
-            // }
-        }
-
+    fn comp_exchange(&mut self, view_id: NodeId, registry: &mut TypeRegistry) {
         debug_assert!(self.taffy.child_count(view_id) == 1);
         let only_child = self.taffy.child_at_index(view_id, 0).unwrap();
 
-        iter_elements_cmp(self, only_child, new_element, registry);
+        let Some(MountableElement::View(ViewElement(view))) = self.elements.remove(&view_id) else {
+            panic!()
+        };
+
+        view.dyn_cmp(only_child, self, registry);
+
+        // todo avoid this by passing in tree?
+        self.elements.insert(view_id, ViewElement(view).into());
+
+        // iter_elements_cmp(self, only_child, new_element, registry);
     }
 }
 
-fn mount_children<T: Element>(
+pub fn iter_elements_cmp(
+    tree: &mut ElementTree,
+    processing: NodeId,
+    mut new_element_at_position: impl Element,
+    registry: &mut TypeRegistry,
+) {
+    let ElementTree {
+        taffy,
+        elements,
+        root,
+    } = tree;
+
+    // let new_mountable_element = &mut new_element_at_position.el;
+
+    let element_at_current_position = elements.remove(&processing).unwrap();
+
+    // if mem::discriminant(&element_at_current_position)
+    //     != mem::discriminant(&new_mountable_element)
+    // {
+    //     let parent = taffy.parent(processing).unwrap();
+    //     let to_delete = iter_elements(&taffy, processing)
+    //         .map(|it| it.1)
+    //         .collect::<Vec<_>>();
+
+    //     let mut idx = 0;
+
+    //     while let false = taffy.child_at_index(parent, idx).unwrap() == processing {
+    //         idx += 1;
+    //     }
+
+    //     taffy.remove(processing).unwrap();
+
+    //     for to_delete in to_delete {
+    //         elements.remove(&to_delete).unwrap();
+    //         let _ = taffy.remove(to_delete);
+    //     }
+
+    //     // todo this will lead to wrong position
+    //     mount_children(registry, tree, parent, new_element_at_position, Some(idx));
+
+    //     return;
+    // }
+
+    if let RebuildResult::Replace =
+        new_element_at_position.try_reuse(element_at_current_position, registry)
+    {
+        let parent = taffy.parent(processing).unwrap();
+        let to_delete = iter_elements(&taffy, processing)
+            .map(|it| it.1)
+            .collect::<Vec<_>>();
+
+        for to_delete in to_delete {
+            elements.remove(&to_delete).unwrap();
+            let _ = taffy.remove(to_delete);
+        }
+
+        let mut idx = 0;
+
+        while let false = taffy.child_at_index(parent, idx).unwrap() == processing {
+            idx += 1;
+        }
+
+        taffy.remove(processing).unwrap();
+
+        // todo this will lead to wrong position not anymore i thinks
+        mount_children(registry, tree, parent, new_element_at_position, Some(idx));
+    } else {
+        struct TheBuilderMagicThingBoo<'a> {
+            tree: &'a mut ElementTree,
+            processing: NodeId,
+            registry: &'a mut TypeRegistry,
+            child_idx: usize,
+        }
+
+        impl<'a> PerChildElementThingy for TheBuilderMagicThingBoo<'a> {
+            fn dothething<E: Element>(&mut self, e: E, parent: NodeId) {
+                debug_assert!(self.processing == parent);
+
+                iter_elements_cmp(
+                    self.tree,
+                    self.tree
+                        .taffy
+                        .child_at_index(parent, self.child_idx)
+                        .unwrap(),
+                    e,
+                    self.registry,
+                );
+
+                self.child_idx += 1;
+            }
+
+            fn insert(&mut self, el: MountableElement) -> NodeId {
+                self.tree.elements.insert(self.processing, el);
+
+                self.processing
+            }
+
+            fn registry(&mut self) -> &mut TypeRegistry {
+                &mut self.registry
+            }
+        }
+
+        new_element_at_position.insert_perform_per_child(TheBuilderMagicThingBoo {
+            tree,
+            processing,
+            registry,
+            child_idx: 0,
+        });
+
+        // todo update style??
+        // new_element_at_position.cmp()
+        // elements.insert(processing, new_element_at_position.el);
+
+        // if let Some(children) = new_element_at_position.children {
+        //     for (idx, child) in children.into_iter().enumerate() {
+        //         let processing = tree.taffy.child_at_index(processing, idx).unwrap();
+        //         iter_elements_cmp(tree, processing, child, registry);
+        //     }
+        // }
+    }
+}
+
+pub(crate) fn mount_children<T: Element>(
     registry: &mut TypeRegistry,
     tree: &mut ElementTree,
     parent: NodeId,
@@ -402,33 +429,69 @@ fn mount_children<T: Element>(
     //     mut el,
     //     mut children,
     // } = element;
-    let (mut el, children) = element.consume();
-
-    if let MountableElement::View(view) = &mut el {
-        view.0.register(registry);
-
-        iter_fields(view.0.as_reflect_mut(), |_, field| {
-            if let Some(reflect_state) =
-                registry.get_type_data::<ReflectStateTrait>(field.type_id())
-            {
-                let Some(state) = reflect_state.get_mut(field) else {
-                    return;
-                };
-
-                state.init()
-            }
-        });
-
-        // children = Some(vec![view.0.build()]);
+    // let (mut eL, children) = element.consume();
+    struct Mounter<'a> {
+        tree: &'a mut ElementTree,
+        parent: NodeId,
+        registry: &'a mut TypeRegistry,
+        idx: Option<usize>,
     }
 
-    let id = if let Some(idx) = idx {
-        tree.insert_at(el, parent, idx)
-    } else {
-        tree.insert(el, parent)
-    };
+    impl<'a> PerChildElementThingy for Mounter<'a> {
+        fn dothething<E: Element>(&mut self, e: E, parent: NodeId) {
+            mount_children(&mut self.registry, self.tree, parent, e, self.idx)
+        }
 
-    T::convert(children, registry, tree, id, None)
+        fn insert(&mut self, el: MountableElement) -> NodeId {
+            if let Some(idx) = self.idx {
+                self.tree.insert_at(el, self.parent, idx)
+            } else {
+                self.tree.insert(el, self.parent)
+            }
+        }
+
+        fn registry(&mut self) -> &mut TypeRegistry {
+            &mut self.registry
+        }
+    }
+
+    element.insert_perform_per_child(Mounter {
+        tree,
+        parent,
+        registry,
+        idx,
+    })
+
+    // element.(registry, tree, parent, idx);
+
+    // TODO?
+
+    // todo!();
+    // if let mountableElement::View(view) = &mut el {
+    //     view.0.register(registry);
+
+    //     iter_fields(view.0.as_reflect_mut(), |_, field| {
+    //         if let Some(reflect_state) =
+    //             registry.get_type_data::<ReflectStateTrait>(field.type_id())
+    //         {
+    //             let Some(state) = reflect_state.get_mut(field) else {
+    //                 return;
+    //             };
+
+    //             state.init()
+    //         }
+    //     });
+
+    //     // children = Some(vec![view.0.build()]);
+    // }
+
+    // let id = if let Some(idx) = idx {
+    //     // todo not into?
+    //     tree.insert_at(el.into(), parent, idx)
+    // } else {
+    //     tree.insert(el.into(), parent)
+    // };
+
     // T::convert(children, |child| {
     //     mount_children(registry, tree, id, child, None);
     // });

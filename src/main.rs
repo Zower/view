@@ -1,5 +1,5 @@
 use bevy_reflect::{GetTypeRegistration, Reflect};
-use view::{hstack, run, Button, ButtonMessage, Element, IntoElement, Receiver, State, Text, View};
+use view::{hstack, run, Button, ButtonMessage, Element, OneOfSwizz, Reducer, State, Text, View};
 use view_macros::{view, Register};
 
 fn main() -> view::Result<()> {
@@ -26,8 +26,8 @@ impl View for MyView {
     fn build(&self) -> impl Element {
         hstack((
             match *self.state {
-                MyViewState::False => MySecondView::default().element(),
-                MyViewState::True(data) => PlusOne(data).element(),
+                MyViewState::False => MySecondView::default().left(),
+                MyViewState::True(data) => PlusOne(data).right(),
             },
             Button::interactions(&self.state),
         ))
@@ -40,10 +40,8 @@ enum MyViewState {
     True(u32),
 }
 
-impl Receiver for MyViewState {
-    type Message = ButtonMessage;
-
-    fn reduce(&mut self, message: Self::Message) {
+impl Reducer<ButtonMessage> for MyViewState {
+    fn reduce(&mut self, message: ButtonMessage) {
         match message {
             ButtonMessage::Clicked(_, _) => {
                 *self = match self {
@@ -58,10 +56,8 @@ impl Receiver for MyViewState {
 #[derive(Reflect, Default)]
 struct MySecondViewState(u32);
 
-impl Receiver for MySecondViewState {
-    type Message = ButtonMessage;
-
-    fn reduce(&mut self, message: Self::Message) {
+impl Reducer<ButtonMessage> for MySecondViewState {
+    fn reduce(&mut self, message: ButtonMessage) {
         match message {
             ButtonMessage::Clicked(_, _) => self.0 += 1,
         }
