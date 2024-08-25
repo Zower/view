@@ -1,4 +1,9 @@
+use std::io;
+
+use editor::{lsp::LspResponseTransmitter, SimpleBuffer};
 use view::prelude::*;
+
+use crate::BufferElement;
 
 #[view]
 pub struct Root;
@@ -6,10 +11,7 @@ pub struct Root;
 impl View for Root {
     fn build(&self) -> impl Element {
         MyView {
-            state: State::create_state(|| MyViewState {
-                data: 0,
-                other_view: false,
-            }),
+            state: State::create_state(|| MyViewState { data: 0 }),
         }
     }
 }
@@ -22,13 +24,26 @@ struct MyView {
 impl View for MyView {
     fn build(&self) -> impl Element {
         hstack((
-            if self.state.other_view {
-                MySecondView::default().left()
-            } else {
-                PlusOne(self.state.data).right()
-            },
             Button::interactions(&self.state),
-            "Hello world",
+            BufferElement::new(|| {
+                let content = std::fs::read_to_string("src/main.rs").unwrap();
+                let simple = SimpleBuffer::new("src/main.rs".into(), &content);
+
+                #[derive(Clone)]
+                struct Fake;
+
+                impl LspResponseTransmitter for Fake {
+                    type Error = io::Error;
+
+                    fn send(&self, event: editor::lsp::LspResponse) -> Result<(), Self::Error> {
+                        dbg!(event);
+
+                        Ok(())
+                    }
+                }
+
+                editor::Buffer::create(simple, ".".into(), Fake).unwrap()
+            }),
         ))
     }
 }
@@ -36,14 +51,12 @@ impl View for MyView {
 #[derive(Reflect, Debug, Clone)]
 struct MyViewState {
     data: u32,
-    other_view: bool,
 }
 
 impl Reducer<ButtonMessage> for MyViewState {
     fn reduce(&mut self, message: ButtonMessage) {
         match message {
             ButtonMessage::Clicked(_, _) => {
-                self.other_view = !self.other_view;
                 self.data += 1;
             }
         }

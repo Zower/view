@@ -8,8 +8,8 @@ use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-    Canvas, CompareResult, Element, InsertContext, Layout, MountedElement, Point, RebuildContext,
-    ReflectStateTrait, View, ViewElement, Widget,
+    Canvas, CompareResult, Element, InsertContext, Layout, MountedWidget, Point, RebuildContext,
+    ReflectStateTrait, View, ViewWidget, Widget,
 };
 
 pub struct App {
@@ -45,7 +45,7 @@ impl App {
                 for (_, node) in iter_elements_from(&self.tree.taffy, self.tree.root) {
                     let el = self.tree.elements.get_mut(&node).unwrap();
                     let layout: Layout = self.tree.taffy.layout(node).unwrap().clone().into();
-                    let MountedElement::Button(_) = el else {
+                    let MountedWidget::Button(_) = el else {
                         continue;
                     };
 
@@ -70,8 +70,7 @@ impl App {
         let from = self.tree.taffy.parent(hint).unwrap_or(hint);
 
         for (_, node) in iter_elements_from(&self.tree.taffy, from) {
-            let MountedElement::View(ViewElement(view)) =
-                self.tree.elements.get_mut(&node).unwrap()
+            let MountedWidget::View(ViewWidget(view)) = self.tree.elements.get_mut(&node).unwrap()
             else {
                 continue;
             };
@@ -231,7 +230,7 @@ pub(crate) fn iter_fields(of: &mut dyn Reflect, mut f: impl FnMut(usize, &mut dy
 pub struct ElementTree {
     // Also holds parent, child information
     taffy: TaffyTree,
-    elements: HashMap<NodeId, MountedElement>,
+    elements: HashMap<NodeId, MountedWidget>,
     root: NodeId,
 }
 
@@ -266,7 +265,7 @@ impl ElementTree {
         this
     }
 
-    pub(crate) fn insert(&mut self, element: MountedElement, parent: NodeId) -> NodeId {
+    pub(crate) fn insert(&mut self, element: MountedWidget, parent: NodeId) -> NodeId {
         let id = self.taffy.new_leaf(element.style().0).unwrap();
         self.taffy.add_child(parent, id).unwrap();
 
@@ -277,7 +276,7 @@ impl ElementTree {
 
     pub(crate) fn insert_at(
         &mut self,
-        element: MountedElement,
+        element: MountedWidget,
         parent: NodeId,
         idx: usize,
     ) -> NodeId {
@@ -297,14 +296,14 @@ impl ElementTree {
         debug_assert!(self.taffy.child_count(view_id) == 1);
         let only_child = self.taffy.child_at_index(view_id, 0).unwrap();
 
-        let Some(MountedElement::View(ViewElement(view))) = self.elements.remove(&view_id) else {
+        let Some(MountedWidget::View(ViewWidget(view))) = self.elements.remove(&view_id) else {
             panic!()
         };
 
         view.dyn_cmp(only_child, self, registry);
 
         // todo avoid this by passing in tree?
-        self.elements.insert(view_id, ViewElement(view).into());
+        self.elements.insert(view_id, ViewWidget(view).into());
     }
 }
 
@@ -337,7 +336,7 @@ pub fn iter_elements_cmp<E: Element>(
             self.child_idx += 1;
         }
 
-        fn insert(&mut self, el: MountedElement) -> NodeId {
+        fn insert(&mut self, el: MountedWidget) -> NodeId {
             self.tree.elements.insert(self.processing, el);
 
             self.processing
@@ -406,7 +405,7 @@ pub(crate) fn mount_children<T: Element>(
             mount_children(&mut self.registry, self.tree, parent, e, None)
         }
 
-        fn insert(&mut self, el: MountedElement) -> NodeId {
+        fn insert(&mut self, el: MountedWidget) -> NodeId {
             if let Some(idx) = self.idx {
                 self.tree.insert_at(el, self.parent, idx)
             } else {

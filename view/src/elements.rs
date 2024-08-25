@@ -1,7 +1,9 @@
+use bevy_reflect::Reflect;
 pub use button::*;
 pub use stack::HStack;
 pub use stack::*;
 use std::{
+    any::Any,
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
@@ -13,11 +15,42 @@ use crate::{Canvas, CompareResult, Element, InsertContext, Layout, RebuildContex
 /// An element that has been mounted into the tree.
 #[derive(Debug)]
 #[enum_delegate::implement(Widget)]
-pub enum MountedElement {
+pub enum MountedWidget {
     Button(Button),
     Text(Text),
     HStack(HStack),
-    View(ViewElement),
+    View(ViewWidget),
+    Custom(CustomWidget),
+}
+
+pub struct CustomWidget(pub Box<dyn AnyWidget>);
+
+pub trait AnyWidget: Any + Widget {
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
+}
+
+impl<T: Any + Widget> AnyWidget for T {
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}
+
+impl Widget for CustomWidget {
+    fn event(&mut self, event: ElementEvent) {
+        self.0.event(event)
+    }
+
+    fn style(&self) -> Style {
+        self.0.style()
+    }
+
+    fn layout(&mut self, layout: Layout, canvas: &mut Canvas) {
+        self.0.layout(layout, canvas)
+    }
+
+    fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {
+        self.0.render(layout, canvas)
+    }
 }
 
 #[enum_delegate::register]
@@ -103,10 +136,10 @@ pub trait Widget {
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
 }
 
-/// A [View] that has been mounted into the tree as a [MountableElement::View].
-pub struct ViewElement(pub(crate) Box<dyn View>);
+/// A [View] that has been mounted into the tree as a [MountedWidget::View].
+pub struct ViewWidget(pub(crate) Box<dyn View>);
 
-impl Widget for ViewElement {}
+impl Widget for ViewWidget {}
 
 /// The style of a widget. Styling decides final layout (size, position) and is based on the flexbox algorithm, thanks to [taffy].
 #[derive(Debug, Clone)]
@@ -144,7 +177,7 @@ mod button {
 
     use crate::{ButtonMessage, Color, Element, Layout, Reducer, State, Triggerable};
 
-    use super::{ElementEvent, MountedElement, Widget};
+    use super::{ElementEvent, MountedWidget, Widget};
 
     #[builder]
     pub struct Button {
@@ -153,16 +186,16 @@ mod button {
 
     impl Element for Button {
         fn insert(self, context: &mut impl crate::InsertContext) {
-            context.insert(MountedElement::Button(self));
+            context.insert(MountedWidget::Button(self));
         }
 
         fn compare_rebuild(
             self,
-            old: MountedElement,
+            old: MountedWidget,
             context: &mut impl crate::RebuildContext,
         ) -> crate::CompareResult<impl Element> {
-            if matches!(old, MountedElement::Button(_)) {
-                context.insert(MountedElement::Button(self));
+            if matches!(old, MountedWidget::Button(_)) {
+                context.insert(MountedWidget::Button(self));
                 crate::CompareResult::<Self>::Success
             } else {
                 crate::CompareResult::Replace { with: self }
@@ -231,12 +264,12 @@ mod button {
 }
 
 mod text {
-    use bon::bon;
-    use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, Metrics};
+    use bon::{bon, builder};
+    use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, LineEnding, Metrics};
 
     use crate::{Element, InsertContext, RebuildContext};
 
-    use super::{MountedElement, Widget};
+    use super::{MountedWidget, Widget};
 
     #[derive(Debug)]
     /// Rich text.
@@ -248,16 +281,16 @@ mod text {
 
     impl Element for Text {
         fn insert(self, context: &mut impl InsertContext) {
-            context.insert(super::MountedElement::Text(self));
+            context.insert(super::MountedWidget::Text(self));
         }
 
         fn compare_rebuild(
             self,
-            old: super::MountedElement,
+            old: super::MountedWidget,
             context: &mut impl RebuildContext,
         ) -> crate::CompareResult<impl Element> {
-            if matches!(old, MountedElement::Text(_)) {
-                context.insert(MountedElement::Text(self));
+            if matches!(old, MountedWidget::Text(_)) {
+                context.insert(MountedWidget::Text(self));
                 crate::CompareResult::<Self>::Success
             } else {
                 crate::CompareResult::Replace { with: self }
@@ -296,7 +329,18 @@ mod text {
                 wrap: wrap.unwrap_or(cosmic_text::Wrap::Word),
             }
         }
+
+        #[builder]
+        pub fn rich(text: Vec<(String, AttrsList)>, size: f32) -> Text {
+            Self {
+                unused_text: Some(text),
+                wrap: cosmic_text::Wrap::Word,
+                buffer: Buffer::new_empty(Metrics::new(size, size)),
+            }
+        }
     }
+
+    impl Text {}
 
     fn text(str: &'static str) -> Text {
         let size = 25.;
@@ -313,16 +357,16 @@ mod text {
 
     impl Element for &'static str {
         fn insert(self, context: &mut impl InsertContext) {
-            context.insert(super::MountedElement::Text(text(self)));
+            context.insert(super::MountedWidget::Text(text(self)));
         }
 
         fn compare_rebuild(
             self,
-            old: MountedElement,
+            old: MountedWidget,
             context: &mut impl RebuildContext,
         ) -> crate::CompareResult<impl Element> {
-            if matches!(old, MountedElement::Text(_)) {
-                context.insert(MountedElement::Text(text(self)));
+            if matches!(old, MountedWidget::Text(_)) {
+                context.insert(MountedWidget::Text(text(self)));
                 crate::CompareResult::<Self>::Success
             } else {
                 crate::CompareResult::Replace { with: self }
@@ -338,7 +382,10 @@ mod text {
 
             let mut buffer = self.buffer.borrow_with(canvas.font_system());
 
-            buffer.set_size(layout.size.width as f32, layout.size.height as f32);
+            buffer.set_size(
+                Some(layout.size.width as f32),
+                Some(layout.size.height as f32),
+            );
 
             if let Some(text) = self.unused_text.take() {
                 buffer.lines.clear();
@@ -346,6 +393,7 @@ mod text {
                 for (text, attrs) in text {
                     buffer.lines.push(BufferLine::new(
                         text,
+                        LineEnding::default(),
                         attrs,
                         // This _MUST_ be advanced for coloring to work.
                         // Otherwise the colors appear to apply per-word instead of per-byte? Not sure, but leave as is.
@@ -386,7 +434,7 @@ mod stack {
 
     use crate::{CompareResult, Element};
 
-    use super::{ChildInsertBuilder, ChildRebuildBuilder, ChildView, MountedElement, Widget};
+    use super::{ChildInsertBuilder, ChildRebuildBuilder, ChildView, MountedWidget, Widget};
 
     #[derive(Debug)]
     pub struct HStack;
@@ -402,7 +450,7 @@ mod stack {
         Children: 'static,
     {
         fn insert(self, context: &mut impl crate::InsertContext) {
-            let id = context.insert(super::MountedElement::HStack(HStack));
+            let id = context.insert(super::MountedWidget::HStack(HStack));
 
             self.children
                 .call_each(ChildInsertBuilder { pc: context, id })
@@ -410,14 +458,14 @@ mod stack {
 
         fn compare_rebuild(
             self,
-            old: super::MountedElement,
+            old: super::MountedWidget,
             context: &mut impl crate::RebuildContext,
         ) -> CompareResult<impl Element + 'static> {
-            if !matches!(old, MountedElement::HStack(_)) {
+            if !matches!(old, MountedWidget::HStack(_)) {
                 return CompareResult::Replace { with: self };
             }
 
-            context.insert(super::MountedElement::HStack(HStack));
+            context.insert(super::MountedWidget::HStack(HStack));
 
             self.children.call_each(ChildRebuildBuilder { pc: context });
 
@@ -506,7 +554,7 @@ impl<A: Element, B: Element> Element for OneOf<A, B> {
 
     fn compare_rebuild(
         self,
-        old: MountedElement,
+        old: MountedWidget,
         context: &mut impl RebuildContext,
     ) -> CompareResult<impl Element> {
         match self {
@@ -612,10 +660,16 @@ impl DerefMut for Style {
     }
 }
 
-impl Debug for ViewElement {
+impl std::fmt::Debug for ViewWidget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("ViewElement")
             .field(&self.0.as_reflect())
             .finish()
+    }
+}
+
+impl std::fmt::Debug for CustomWidget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("CustomWidget").finish()
     }
 }

@@ -80,7 +80,7 @@ impl<T: View + 'static> Element for T {
 
         let built = self.build();
 
-        let boxed = ViewElement(Box::new(self)).into();
+        let boxed = ViewWidget(Box::new(self)).into();
 
         let id = context.insert(boxed);
         context.child_work(built, id);
@@ -90,10 +90,10 @@ impl<T: View + 'static> Element for T {
 
     fn compare_rebuild(
         mut self,
-        old: MountedElement,
+        old: MountedWidget,
         context: &mut impl RebuildContext,
     ) -> CompareResult<impl Element> {
-        let MountedElement::View(mut view) = old else {
+        let MountedWidget::View(mut view) = old else {
             return CompareResult::Replace { with: self };
         };
 
@@ -125,7 +125,7 @@ impl<T: View + 'static> Element for T {
         // can be optimized
         *view.0.as_any_mut().downcast_mut::<Self>().unwrap() = self;
 
-        context.insert(MountedElement::View(view));
+        context.insert(MountedWidget::View(view));
 
         context.child_work(built);
 
@@ -137,7 +137,7 @@ impl<T: View + 'static> Element for T {
 /// See [Element::insert_perform_per_child]
 pub trait InsertContext {
     fn child_work<E: Element>(&mut self, e: E, parent: NodeId);
-    fn insert(&mut self, m: MountedElement) -> NodeId;
+    fn insert(&mut self, m: MountedWidget) -> NodeId;
     fn registry(&mut self) -> &mut TypeRegistry;
 }
 
@@ -145,7 +145,7 @@ pub trait InsertContext {
 /// See [Element::compare_rebuild]
 pub trait RebuildContext {
     fn child_work<E: Element>(&mut self, e: E);
-    fn insert(&mut self, m: MountedElement) -> NodeId;
+    fn insert(&mut self, m: MountedWidget) -> NodeId;
     fn registry(&mut self) -> &mut TypeRegistry;
 }
 
@@ -156,30 +156,30 @@ pub enum CompareResult<E> {
     Replace { with: E },
 }
 
-/// Elements are some type that can be used to build a widget tree by inserting a [MountedElement] at some given position.
+/// Elements are some type that can be used to build a widget tree by inserting a [MountedWidget] at some given position.
 /// Elements must also contain their own children, and perform any work the framework demands of them via [InsertContext] and [RebuildContext].
-/// In some ways it is the bridge between both [View]s and [Widget]s, as it will commonly be implemented by both.
+/// In some ways Elements are the bridge between both [View]s and [Widget]s, as it will commonly be implemented by both.
 /// Usually one won't manually implement this trait (though, you can.), instead prefer to create [View]s.
 pub trait Element: 'static {
-    /// Each element is responsible for inserting itself into the tree.
-    /// When this function is called, the element is expected to insert some [MountedElement] that it represents into the tree via [InsertContext::insert].
+    /// Each element is responsible for inserting into the tree.
+    /// The element is expected to insert some [MountedWidget] that it represents into the tree via [InsertContext::insert].
     /// Additionally, if the element has any children (or just other elements that should be inserted underneath it), call [InsertContext::child_work] once per child.
     fn insert(self, context: &mut impl InsertContext);
 
-    /// When the element tree is rebuilt because of a dirty view, the tree must be diffed. This function is called for each element down the tree from the dirty widget,
+    /// When the element tree is rebuilt because of a dirty view, the tree must be diffed. This function is called for each new element (returned by [View::build]) down the tree from the dirty widget,
     /// and it is the responsibility of that element to:
     /// * Compare itself to old. If old is not of the same type or otherwise incompatible with self, return a [CompareResult::Replace], with self.
-    /// * If old can be used to build this widget, rebuild. Reuse any allocations or state that has accumulated in the old element.
-    /// * Additionally, if the new element has any children call [InsertContext::child_work] once per child.
+    /// * If old can be used to build a new MountedWidget, rebuild. Reuse any allocations or state that has accumulated in the old element.
+    /// * Additionally, if the new element has any children, call [RebuildContext::child_work] once per child.
     /// * Then return [CompareResult::Success], indicating a successful rebuild and insertion.
     fn compare_rebuild(
         self,
-        old: MountedElement,
+        old: MountedWidget,
         context: &mut impl RebuildContext,
     ) -> CompareResult<impl Element>;
 }
 
-/// Views are the building blocks of an application. They can be used to compose other views elements, and any mix of the two.
+/// Views are the building blocks of an application. They can be used to compose other views, elements, and any mix of the two.
 ///
 /// ```
 /// # use view::prelude::*;

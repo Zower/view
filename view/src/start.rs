@@ -1,4 +1,4 @@
-use std::{num::NonZeroU32, path::PathBuf};
+use std::num::NonZeroU32;
 
 use femtovg::{renderer::OpenGl, Canvas};
 
@@ -10,11 +10,10 @@ use glutin::{
     surface::{SurfaceAttributesBuilder, WindowSurface},
 };
 use glutin_winit::DisplayBuilder;
-use miette::IntoDiagnostic;
-use raw_window_handle::HasRawWindowHandle;
+use raw_window_handle::HasWindowHandle;
 use winit::{
-    event_loop::{EventLoop, EventLoopBuilder, EventLoopWindowTarget},
-    window::{Icon, WindowBuilder},
+    event_loop::{ActiveEventLoop, EventLoop},
+    window::{Icon, WindowAttributes},
 };
 
 use crate::GlobalEvent;
@@ -31,7 +30,7 @@ pub(crate) fn create_event_loop(
     winit::window::Window,
     glutin::config::Config,
 ) {
-    let event_loop = EventLoopBuilder::with_user_event().build().unwrap();
+    let event_loop = EventLoop::with_user_event().build().unwrap();
 
     let (canvas, context, surface, window, config) =
         create_gl_context_and_window(&event_loop, width, height, title);
@@ -40,7 +39,7 @@ pub(crate) fn create_event_loop(
 }
 
 pub fn _new_window(
-    event_loop: &EventLoopWindowTarget<GlobalEvent>,
+    event_loop: &ActiveEventLoop,
     width: u32,
     height: u32,
     title: &'static str,
@@ -52,18 +51,18 @@ pub fn _new_window(
     let image = include_bytes!("../../assets/icon.rgba");
     let icon = Icon::from_rgba(image.to_vec(), 1024, 1024).unwrap();
 
-    let window_builder = WindowBuilder::new()
+    let window_attr = WindowAttributes::default()
         .with_inner_size(winit::dpi::PhysicalSize::new(width, height))
         .with_resizable(true)
         .with_window_icon(Some(icon))
         .with_title(title);
 
-    let window = glutin_winit::finalize_window(event_loop, window_builder, gl_config).unwrap();
+    let window = glutin_winit::finalize_window(event_loop, window_attr, gl_config).unwrap();
 
-    let raw_window_handle = window.raw_window_handle();
+    let raw_window_handle = window.window_handle().unwrap();
 
     let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
-        raw_window_handle,
+        raw_window_handle.as_raw(),
         NonZeroU32::new(width).unwrap(),
         NonZeroU32::new(height).unwrap(),
     );
@@ -79,7 +78,7 @@ pub fn _new_window(
 }
 
 fn create_gl_context_and_window(
-    event_loop: &EventLoopWindowTarget<GlobalEvent>,
+    event_loop: &EventLoop<GlobalEvent>,
     width: u32,
     height: u32,
     title: &'static str,
@@ -93,7 +92,7 @@ fn create_gl_context_and_window(
     let image = include_bytes!("../../assets/icon.rgba");
     let icon = Icon::from_rgba(image.to_vec(), 1024, 1024).unwrap();
 
-    let window_builder = WindowBuilder::new()
+    let window_attrs = WindowAttributes::default()
         .with_inner_size(winit::dpi::PhysicalSize::new(width, height))
         .with_resizable(true)
         .with_visible(false)
@@ -102,7 +101,7 @@ fn create_gl_context_and_window(
 
     let template = ConfigTemplateBuilder::new().with_alpha_size(8);
 
-    let display_builder = DisplayBuilder::new().with_window_builder(Some(window_builder));
+    let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attrs));
 
     let (window, gl_config) = display_builder
         .build(event_loop, template, |configs| {
@@ -125,7 +124,7 @@ fn create_gl_context_and_window(
 
     let window = window.unwrap();
 
-    let raw_window_handle = Some(window.raw_window_handle());
+    let raw_window_handle = Some(window.window_handle().unwrap().as_raw());
 
     let gl_display = gl_config.display();
 
@@ -146,7 +145,7 @@ fn create_gl_context_and_window(
 
     let (width, height): (u32, u32) = window.inner_size().into();
 
-    let raw_window_handle = window.raw_window_handle();
+    let raw_window_handle = window.window_handle().unwrap().as_raw();
 
     let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
         raw_window_handle,
