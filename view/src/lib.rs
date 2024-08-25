@@ -1,15 +1,27 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
 use app::App;
-use bevy_reflect::{reflect_trait, GetPath, GetTypeRegistration, Reflect, TypeRegistry};
+use bevy_reflect::{reflect_trait, Reflect, TypeRegistry};
 
 pub mod app;
 mod elements;
 pub mod patch;
+pub mod prelude;
 mod runner;
 mod start;
 mod text;
 mod utils;
+
+pub mod reflect {
+    pub use bevy_reflect::*;
+}
+
+pub mod taffy {
+    pub use taffy::*;
+}
 
 use taffy::NodeId;
 pub use utils::*;
@@ -23,13 +35,15 @@ use runner::Runner;
 
 pub type Result<T> = miette::Result<T>;
 
+// Some utility types
 pub type Point = taffy::Point<u32>;
 pub type Size = taffy::Size<u32>;
 pub type Rect = taffy::Rect<u32>;
-
 pub struct Color(femtovg::Color);
 
-pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
+/// Run the app.
+/// Call this once with your top level view.
+pub fn run<V: View>(v: V) -> crate::Result<()> {
     let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
 
     let app = App::new(v, window.inner_size());
@@ -47,13 +61,12 @@ pub fn run<V: View + GetTypeRegistration + GetPath>(v: V) -> crate::Result<()> {
     .run(app)
 }
 
-impl<T: View> Element for T {
-    fn insert_perform_per_child(mut self, mut per_child: impl PerChildElementThingy) {
-        dbg!("--------------------------------------- ALLOC -----------------------------------");
-        self.register(per_child.registry());
+impl<T: View + 'static> Element for T {
+    fn insert(mut self, context: &mut impl InsertContext) {
+        self.register(context.registry());
 
         app::iter_fields(self.as_reflect_mut(), |_, field| {
-            if let Some(reflect_state) = per_child
+            if let Some(reflect_state) = context
                 .registry()
                 .get_type_data::<ReflectStateTrait>(field.type_id())
             {
@@ -69,33 +82,35 @@ impl<T: View> Element for T {
 
         let boxed = ViewElement(Box::new(self)).into();
 
-        let id = per_child.insert(boxed);
-        per_child.dothething(built, id);
+        let id = context.insert(boxed);
+        context.child_work(built, id);
 
         // mount_children(registry, tree, id, built, idx)
     }
 
-    fn try_reuse(&mut self, old: MountableElement, registry: &TypeRegistry) -> RebuildResult
-    where
-        Self: Sized,
-    {
-        let MountableElement::View(mut view) = old else {
-            return RebuildResult::Replace;
+    fn compare_rebuild(
+        mut self,
+        old: MountedElement,
+        context: &mut impl RebuildContext,
+    ) -> CompareResult<impl Element> {
+        let MountedElement::View(mut view) = old else {
+            return CompareResult::Replace { with: self };
         };
 
         if self.type_id() != view.0.type_id() {
-            return RebuildResult::Replace;
+            return CompareResult::Replace { with: self };
         }
 
         app::iter_fields(self.as_reflect_mut(), |index, field| {
-            if let Some(reflect_state) =
-                registry.get_type_data::<ReflectStateTrait>(field.type_id())
+            if let Some(reflect_state) = context
+                .registry()
+                .get_type_data::<ReflectStateTrait>(field.type_id())
             {
                 // todo uggly
                 if let Some(state) = reflect_state.get_mut(field) {
                     if let bevy_reflect::ReflectMut::Struct(st) = view.0.reflect_mut() {
                         state.reuse(st.field_at_mut(index).unwrap());
-                    } else if let bevy_reflect::ReflectMut::Enum(en) = view.0.reflect_mut() {
+                    } else if let bevy_reflect::ReflectMut::Enum(_) = view.0.reflect_mut() {
                         panic!();
                         // state.reuse(en.field_at_mut(index).unwrap());
                     } else {
@@ -105,54 +120,105 @@ impl<T: View> Element for T {
             }
         });
 
-        RebuildResult::Rebuilt
+        let built = self.build();
+
+        // can be optimized
+        *view.0.as_any_mut().downcast_mut::<Self>().unwrap() = self;
+
+        context.insert(MountedElement::View(view));
+
+        context.child_work(built);
+
+        return CompareResult::Success;
     }
 }
 
-pub trait PerChildElementThingy {
-    fn dothething<E: Element>(&mut self, e: E, parent: NodeId);
-    fn insert(&mut self, m: MountableElement) -> NodeId;
+/// Mostly a hack around functions being monomorphized at the call-site.
+/// See [Element::insert_perform_per_child]
+pub trait InsertContext {
+    fn child_work<E: Element>(&mut self, e: E, parent: NodeId);
+    fn insert(&mut self, m: MountedElement) -> NodeId;
     fn registry(&mut self) -> &mut TypeRegistry;
 }
 
-pub trait Element: 'static {
-    fn insert_perform_per_child(self, context: impl PerChildElementThingy);
-
-    fn try_reuse(&mut self, old: MountableElement, registry: &TypeRegistry) -> RebuildResult
-    where
-        Self: Sized;
-
-    fn just_spawn(
-        tree: &mut app::ElementTree,
-        parent: NodeId,
-        idx: Option<usize>,
-        element: MountableElement,
-    ) {
-        if let Some(idx) = idx {
-            tree.insert_at(element, parent, idx)
-        } else {
-            tree.insert(element, parent)
-        };
-    }
+/// Mostly a hack around functions being monomorphized at the call-site.
+/// See [Element::compare_rebuild]
+pub trait RebuildContext {
+    fn child_work<E: Element>(&mut self, e: E);
+    fn insert(&mut self, m: MountedElement) -> NodeId;
+    fn registry(&mut self) -> &mut TypeRegistry;
 }
 
-// impl<T: Into<MountableElement>> BecomeElement for T {
-//     fn into(self) -> impl MountedElementBehaviour {
-//         self.into()
-//     }
-// }
+/// The result of a rebuild.
+/// See [Element::compare_rebuild]
+pub enum CompareResult<E> {
+    Success,
+    Replace { with: E },
+}
 
+/// Elements are some type that can be used to build a widget tree by inserting a [MountedElement] at some given position.
+/// Elements must also contain their own children, and perform any work the framework demands of them via [InsertContext] and [RebuildContext].
+/// In some ways it is the bridge between both [View]s and [Widget]s, as it will commonly be implemented by both.
+/// Usually one won't manually implement this trait (though, you can.), instead prefer to create [View]s.
+pub trait Element: 'static {
+    /// Each element is responsible for inserting itself into the tree.
+    /// When this function is called, the element is expected to insert some [MountedElement] that it represents into the tree via [InsertContext::insert].
+    /// Additionally, if the element has any children (or just other elements that should be inserted underneath it), call [InsertContext::child_work] once per child.
+    fn insert(self, context: &mut impl InsertContext);
+
+    /// When the element tree is rebuilt because of a dirty view, the tree must be diffed. This function is called for each element down the tree from the dirty widget,
+    /// and it is the responsibility of that element to:
+    /// * Compare itself to old. If old is not of the same type or otherwise incompatible with self, return a [CompareResult::Replace], with self.
+    /// * If old can be used to build this widget, rebuild. Reuse any allocations or state that has accumulated in the old element.
+    /// * Additionally, if the new element has any children call [InsertContext::child_work] once per child.
+    /// * Then return [CompareResult::Success], indicating a successful rebuild and insertion.
+    fn compare_rebuild(
+        self,
+        old: MountedElement,
+        context: &mut impl RebuildContext,
+    ) -> CompareResult<impl Element>;
+}
+
+/// Views are the building blocks of an application. They can be used to compose other views elements, and any mix of the two.
+///
+/// ```
+/// # use view::prelude::*;
+///
+/// #[derive(Reflect)]
+/// struct CounterState(u32);
+///
+/// impl Reducer<ButtonMessage> for CounterState {
+///     fn reduce(&mut self, message: ButtonMessage) {
+///         self.0 += 1;
+///     }
+/// }
+///
+/// #[view]
+/// struct Counter {
+///     state: State<ButtonMessage, CounterState>
+/// }
+///
+/// impl View for Counter {
+///     fn build(&self) -> impl Element {
+///         Text::builder().text(format!("{}", self.state.0)).build()
+///     }
+/// }
+///
+/// ```
+///
 pub trait View: DynView {
     fn build(&self) -> impl Element
     where
         Self: Sized;
 }
 
+#[doc(hidden)]
 pub trait DynView: Reflect {
     fn register(&self, registry: &mut TypeRegistry);
     fn dyn_cmp(&self, child_id: NodeId, tree: &mut app::ElementTree, registry: &mut TypeRegistry);
 }
 
+/// A painting context. Mostly a wrapper around [femtovg::Canvas].
 pub struct Canvas {
     inner: femtovg::Canvas<OpenGl>,
     pub text_cache: text::RenderCache,
@@ -186,16 +252,45 @@ pub(crate) trait StateTrait {
     fn process(&mut self);
 }
 
+/// A state reducer. It is generic over its message and is mostly used by [State] to handle a message sent to a given view.
 pub trait Reducer<M> {
     fn reduce(&mut self, message: M);
 }
 
 #[derive(Reflect, Debug, Clone)]
 #[reflect(StateTrait)]
+/// Some state for a view.
+/// State is the only way to change a view and expect it to corrextly re-render.
+/// Since we use reflection, state must be stored as a field on a struct implementing [View] for it to work as expected.
+/// ```
+/// # use view::prelude::*;
+///
+/// #[derive(Reflect)]
+/// struct CounterState(u32);
+///
+/// impl Reducer<ButtonMessage> for CounterState {
+///     fn reduce(&mut self, message: ButtonMessage) {
+///         self.0 += 1;
+///     }
+/// }
+///
+/// #[view]
+/// struct Counter {
+///     state: State<ButtonMessage, CounterState>
+/// }
+///
+/// impl View for Counter {
+///     fn build(&self) -> impl Element {
+///         Text::builder().text(format!("{}", self.state.0)).build()
+///     }
+/// }
+///
+/// ```
 pub struct State<M: Clone + 'static, S: Reducer<M> + 'static> {
     #[reflect(ignore)]
     state: Option<S>,
     #[reflect(ignore)]
+    // TODO: Should also be optional. No need to allocated if we haven't initted state yet.
     inner: MessageInner<M>,
     #[reflect(ignore)]
     #[reflect(default = "create_state_fake")]
@@ -257,7 +352,7 @@ impl<M: Message, S: Default + Reducer<M> + 'static> Default for State<M, S> {
 }
 
 #[derive(Debug, Clone)]
-pub struct MessageInner<M> {
+pub(crate) struct MessageInner<M> {
     rx: crossbeam::channel::Receiver<M>,
     tx: crossbeam::channel::Sender<M>,
 }
@@ -303,6 +398,8 @@ impl<M: Clone + 'static, S: Reducer<M>> State<M, S> {
 }
 
 #[derive(Debug, Copy, Clone)]
+/// The result of layout out a widget with its given [Style].
+/// It is passed into [Widget::render] and [Widget::layout] and should be respected to avoid clipping issues.
 pub struct Layout {
     /// The relative ordering of the node
     ///
@@ -368,6 +465,7 @@ impl From<taffy::Layout> for Layout {
     }
 }
 
+/// An action that can be triggered. Most commonly a on-click handler.
 pub struct Triggerable {
     f: Box<dyn Fn()>,
 }
@@ -378,7 +476,16 @@ impl Triggerable {
     }
 }
 
-pub enum GlobalEvent {}
+impl<F: Fn() + 'static> From<F> for Triggerable {
+    fn from(value: F) -> Self {
+        Triggerable { f: Box::new(value) }
+    }
+}
+
+#[doc(hidden)]
+pub enum GlobalEvent {
+    Dirty { hint: NodeId },
+}
 
 impl Color {
     pub fn rgb(r: u8, b: u8, g: u8) -> Self {

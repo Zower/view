@@ -9,11 +9,11 @@ use winit::{
 
 use crate::{
     app::{App, AppEvent},
-    Canvas, GlobalEvent, Point, View,
+    Canvas, GlobalEvent, Point,
 };
 
-pub struct Runner {
-    pub el: EventLoop<GlobalEvent>,
+pub(crate) struct Runner {
+    pub(crate) el: EventLoop<GlobalEvent>,
     pub(crate) canvas: Canvas,
     pub(crate) window: (
         glutin::surface::Surface<glutin::surface::WindowSurface>,
@@ -23,7 +23,7 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn run<V: View>(self, mut app: App<V>) -> crate::Result<()> {
+    pub fn run(self, mut app: App) -> crate::Result<()> {
         let Self {
             el,
             mut canvas,
@@ -58,11 +58,13 @@ impl Runner {
                     target.set_control_flow(ControlFlow::Wait);
                 }
                 winit::event::Event::UserEvent(event) => match event {
-                    // FlareEvent::LspEvent(event) => {
-                    //     app.event(LspEvent(event));
+                    GlobalEvent::Dirty { hint } => {
+                        app.hint_dirty(hint);
+                    } // FlareEvent::LspEvent(event) => {
+                      //     app.event(LspEvent(event));
 
-                    //     target.set_control_flow(ControlFlow::Poll);
-                    // }
+                      //     target.set_control_flow(ControlFlow::Poll);
+                      // }
                 },
                 winit::event::Event::WindowEvent {
                     event,
@@ -156,37 +158,7 @@ impl Runner {
         initial_window: &winit::window::Window,
         // el_proxy: crate::Proxy,
     ) -> crate::Result<()> {
-        // let world = &mut app.world;
-        // let mut surfaces = Surfaces::default();
-
         initial_window.set_visible(true);
-        // let window_id = world
-        //     .spawn(Window {
-        //         inner: initial_window,
-        //     })
-        //     .id();
-
-        // surfaces.insert(window_id, initial_surface);
-
-        // world.insert_non_send_resource(RenderContext {
-        //     gl_context,
-        //     canvas,
-        //     render_cache: text::init_cache(),
-        //     surfaces,
-        // });
-
-        // app.resource(config::config()?);
-        // app.resource(Editor::new());
-        // app.resource(ProxyResource(el_proxy));
-
-        // app.initialize_event::<Resize>();
-        // app.initialize_event::<KeyEvent>();
-        // app.initialize_event::<Scrolled>();
-        // app.initialize_event::<BufferAction>();
-        // app.initialize_event::<LspEvent>();
-
-        // app.inititalize(EditorModule);
-        // app.inititalize(UiModule);
 
         Ok(())
     }

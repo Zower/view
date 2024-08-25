@@ -15,11 +15,11 @@ const GLYPH_PADDING: u32 = 1;
 const GLYPH_MARGIN: u32 = 1;
 const TEXTURE_SIZE: usize = 512;
 
-pub fn init_cache() -> RenderCache {
+pub(crate) fn init_cache() -> RenderCache {
     // Text stuff
     let mut font_system = FontSystem::new();
 
-    let font = include_bytes!("../assets/JetBrainsMono-Regular.ttf").to_vec();
+    let font = include_bytes!("../../assets/JetBrainsMono-Regular.ttf").to_vec();
     font_system.db_mut().load_font_data(font);
 
     RenderCache {
@@ -55,7 +55,7 @@ pub struct RenderCache {
 }
 
 impl RenderCache {
-    pub(crate) fn fill_buffer_to_draw_commands<T: Renderer>(
+    pub fn fill_buffer_to_draw_commands<T: Renderer>(
         &mut self,
         canvas: &mut Canvas<T>,
         buffer: &cosmic_text::Buffer,

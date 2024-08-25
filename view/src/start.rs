@@ -19,26 +19,7 @@ use winit::{
 
 use crate::GlobalEvent;
 
-pub struct InitResult {
-    pub workspace: PathBuf,
-    pub file: Option<PathBuf>,
-}
-
-pub fn initial_workspace() -> miette::Result<InitResult> {
-    let workspace = PathBuf::from("./").canonicalize().into_diagnostic()?;
-
-    let mut args = std::env::args();
-    let _ = args.next();
-
-    let file = args.next();
-
-    Ok(InitResult {
-        workspace,
-        file: file.map(Into::into),
-    })
-}
-
-pub fn create_event_loop(
+pub(crate) fn create_event_loop(
     width: u32,
     height: u32,
     title: &'static str,
@@ -68,7 +49,7 @@ pub fn _new_window(
     glutin::surface::Surface<WindowSurface>,
     winit::window::Window,
 ) {
-    let image = include_bytes!("../assets/icon.rgba");
+    let image = include_bytes!("../../assets/icon.rgba");
     let icon = Icon::from_rgba(image.to_vec(), 1024, 1024).unwrap();
 
     let window_builder = WindowBuilder::new()
@@ -109,7 +90,7 @@ fn create_gl_context_and_window(
     winit::window::Window,
     glutin::config::Config,
 ) {
-    let image = include_bytes!("../assets/icon.rgba");
+    let image = include_bytes!("../../assets/icon.rgba");
     let icon = Icon::from_rgba(image.to_vec(), 1024, 1024).unwrap();
 
     let window_builder = WindowBuilder::new()
