@@ -32,7 +32,7 @@ impl Widget for BufferWidget {
     fn layout(&mut self, layout: Layout, canvas: &mut Canvas) {
         self.text.layout(layout, canvas);
     }
-    fn render(&self, layout: view::Layout, canvas: &mut Canvas) {
+    fn render(&self, layout: Layout, canvas: &mut Canvas) {
         self.text.render(layout, canvas)
     }
 }
