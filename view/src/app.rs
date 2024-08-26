@@ -20,6 +20,7 @@ pub struct App {
 // Global events passed through from the event loop abstraction.
 #[derive(Debug)]
 pub(crate) enum AppEvent {
+    Resize(PhysicalSize<u32>),
     Clicked(u32, u32),
 }
 
@@ -29,7 +30,7 @@ impl App {
 
         view.register(&mut type_registry);
 
-        let tree = ElementTree::create(&mut type_registry, view);
+        let tree = ElementTree::create(&mut type_registry, view, size);
 
         Self {
             registry: type_registry,
@@ -57,6 +58,22 @@ impl App {
                         el.event(crate::ElementEvent::Click(x, y));
                     }
                 }
+            }
+            AppEvent::Resize(new_size) => {
+                self.tree
+                    .taffy
+                    .set_style(
+                        self.tree.root,
+                        taffy::Style {
+                            size: taffy::Size {
+                                // todo
+                                width: length(new_size.width as f32),
+                                height: length(new_size.height as f32),
+                            },
+                            ..Default::default()
+                        },
+                    )
+                    .expect("Root doesn't exist")
             }
         }
 
@@ -108,7 +125,6 @@ impl App {
     }
 
     pub(crate) fn paint(&mut self, size: winit::dpi::PhysicalSize<u32>, canvas: &mut Canvas) {
-        dbg!(self.tree.taffy.total_node_count());
         self.tree
             .taffy
             .compute_layout(
@@ -235,11 +251,19 @@ pub struct ElementTree {
 }
 
 impl ElementTree {
-    pub(crate) fn create<V: View>(registry: &mut TypeRegistry, root_item: V) -> Self {
-        Self::create_internal(registry, root_item)
+    pub(crate) fn create<V: View>(
+        registry: &mut TypeRegistry,
+        root_item: V,
+        size: PhysicalSize<u32>,
+    ) -> Self {
+        Self::create_internal(registry, root_item, size)
     }
 
-    fn create_internal(registry: &mut TypeRegistry, element: impl Element) -> Self {
+    fn create_internal(
+        registry: &mut TypeRegistry,
+        element: impl Element,
+        size: PhysicalSize<u32>,
+    ) -> Self {
         let mut taffy = TaffyTree::default();
         let elements = HashMap::default();
 
@@ -247,8 +271,8 @@ impl ElementTree {
             .new_leaf(taffy::Style {
                 size: taffy::Size {
                     // todo
-                    width: length(800.0),
-                    height: length(800.0),
+                    width: length(size.width as f32),
+                    height: length(size.height as f32),
                 },
                 ..Default::default()
             })

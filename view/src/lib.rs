@@ -31,7 +31,7 @@ pub use elements::*;
 
 use crossbeam::channel::TryRecvError;
 use femtovg::renderer::OpenGl;
-use runner::Runner;
+use runner::{Runner, Windows};
 
 pub type Result<T> = miette::Result<T>;
 
@@ -50,15 +50,15 @@ pub fn run<V: View>(v: V) -> crate::Result<()> {
     let cache = text::init_cache();
 
     Runner {
-        el,
+        app,
         canvas: Canvas {
             inner: canvas,
             text_cache: cache,
         },
-        window: (surface, window),
+        windows: Windows::new(window, surface),
         gl_context: pcc,
     }
-    .run(app)
+    .run(el)
 }
 
 impl<T: View + 'static> Element for T {

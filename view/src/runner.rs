@@ -1,10 +1,12 @@
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 use glutin::{prelude::PossiblyCurrentGlContext, surface::GlSurface};
 use miette::IntoDiagnostic;
 use winit::{
-    event::{ElementState, StartCause, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    application::ApplicationHandler,
+    event::{ElementState, WindowEvent},
+    event_loop::EventLoop,
+    window::WindowId,
 };
 
 use crate::{
@@ -13,153 +15,166 @@ use crate::{
 };
 
 pub(crate) struct Runner {
-    pub(crate) el: EventLoop<GlobalEvent>,
+    pub(crate) app: App,
     pub(crate) canvas: Canvas,
-    pub(crate) window: (
-        glutin::surface::Surface<glutin::surface::WindowSurface>,
-        winit::window::Window,
-    ),
+    pub(crate) windows: Windows,
     pub(crate) gl_context: glutin::context::PossiblyCurrentContext,
 }
 
 impl Runner {
-    pub fn run(self, mut app: App) -> crate::Result<()> {
-        let Self {
-            el,
-            mut canvas,
-            window: (initial_surface, initial_window),
-            gl_context,
-        } = self;
+    pub fn run(mut self, el: EventLoop<GlobalEvent>) -> crate::Result<()> {
+        Self::init(&self.windows.root())?;
 
-        Self::init(
-            // canvas,
-            // gl_context,
-            // initial_surface,
-            &initial_window,
-            // crate::Proxy(el.create_proxy()),
-        )?;
-
-        // app.startup();
-        // app.logic();
-
-        let mut mouse_pos = Point { x: 0, y: 0 };
-
-        el.run(move |event, target| {
-            match event {
-                winit::event::Event::NewEvents(StartCause::Init) => {
-                    target.set_control_flow(ControlFlow::Wait);
-                }
-                winit::event::Event::NewEvents(StartCause::Poll) => {
-                    let now = std::time::Instant::now();
-                    // app.main();
-                    let elapsed = now.elapsed();
-
-                    println!("{:?}", elapsed);
-                    target.set_control_flow(ControlFlow::Wait);
-                }
-                winit::event::Event::UserEvent(event) => match event {
-                    GlobalEvent::Dirty { hint } => {
-                        app.hint_dirty(hint);
-                    } // FlareEvent::LspEvent(event) => {
-                      //     app.event(LspEvent(event));
-
-                      //     target.set_control_flow(ControlFlow::Poll);
-                      // }
-                },
-                winit::event::Event::WindowEvent {
-                    event,
-                    window_id: _window_id,
-                } => {
-                    match event {
-                        WindowEvent::RedrawRequested => {
-                            gl_context
-                                .make_current(&initial_surface)
-                                .expect("Making current to work");
-
-                            canvas.clear_rect(
-                                0,
-                                0,
-                                initial_window.inner_size().width,
-                                initial_window.inner_size().height,
-                                femtovg::Color::black(),
-                            );
-
-                            app.paint(initial_window.inner_size(), &mut canvas);
-
-                            canvas.flush();
-
-                            initial_surface
-                                .swap_buffers(&gl_context)
-                                .expect("Swapping buffer to work");
-                        }
-
-                        WindowEvent::CloseRequested => target.exit(),
-                        WindowEvent::ModifiersChanged(_modifiers) => {}
-                        WindowEvent::CursorMoved { position, .. } => {
-                            mouse_pos = Point {
-                                x: position.x as u32,
-                                y: position.y as u32,
-                            };
-                        }
-                        WindowEvent::MouseInput {
-                            state: ElementState::Pressed,
-                            ..
-                        } => {
-                            let now = Instant::now();
-                            app.event(AppEvent::Clicked(mouse_pos.x, mouse_pos.y));
-                            let elapsed = now.elapsed();
-                            dbg!(elapsed);
-                            // warn!("Unused mouse input");
-
-                            // let window = &windows[&window_id];
-
-                            initial_window.request_redraw();
-                        }
-                        WindowEvent::MouseWheel { delta, .. } => {
-                            let _pixels = match delta {
-                                winit::event::MouseScrollDelta::LineDelta(_, delta) => -delta * 45.,
-                                // TODO probably invert this too
-                                winit::event::MouseScrollDelta::PixelDelta(delta) => delta.y as f32,
-                            };
-
-                            // app.event(Scrolled {
-                            //     pixels,
-                            //     position: mouse_pos,
-                            // });
-
-                            // app.main();
-                        }
-                        WindowEvent::KeyboardInput { event, .. } => {
-                            dbg!(event);
-                            // info!("Received keyboard event");
-                            // app.event(KeyEvent(event.into()));
-                            // app.main();
-                        }
-                        WindowEvent::Resized(size) => {
-                            dbg!(size);
-                            // app.event(Resize(window_id, size));
-                            // app.main();
-                        }
-                        _ => {}
-                    }
-                }
-                _ => {}
-            }
-        })
-        .into_diagnostic()?;
+        el.run_app(&mut self).into_diagnostic()?;
 
         Ok(())
     }
 
-    fn init(
-        // canvas: Canvas,
-        // gl_context: PossiblyCurrentContext,
-        // initial_surface: Surface<WindowSurface>,
-        initial_window: &winit::window::Window,
-        // el_proxy: crate::Proxy,
-    ) -> crate::Result<()> {
+    fn init(initial_window: &winit::window::Window) -> crate::Result<()> {
         initial_window.set_visible(true);
 
         Ok(())
     }
+}
+
+impl ApplicationHandler<GlobalEvent> for Runner {
+    fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {}
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: WindowEvent,
+    ) {
+        let Self {
+            app,
+            ref mut canvas,
+            windows,
+            gl_context,
+        } = self;
+
+        let Some(WindowData {
+            window,
+            surface,
+            mouse_pos,
+            parent: _,
+        }) = windows.get_mut(&window_id)
+        else {
+            dbg!("Missing window");
+            return;
+        };
+
+        match event {
+            WindowEvent::RedrawRequested => {
+                gl_context
+                    .make_current(&surface)
+                    .expect("Making current to work");
+
+                canvas.clear_rect(
+                    0,
+                    0,
+                    window.inner_size().width,
+                    window.inner_size().height,
+                    femtovg::Color::black(),
+                );
+
+                app.paint(window.inner_size(), canvas);
+
+                canvas.flush();
+
+                surface
+                    .swap_buffers(&gl_context)
+                    .expect("Swapping buffer to work");
+            }
+
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::ModifiersChanged(_modifiers) => {}
+            WindowEvent::CursorMoved { position, .. } => {
+                *mouse_pos = Point {
+                    x: position.x as u32,
+                    y: position.y as u32,
+                };
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                ..
+            } => {
+                let now = Instant::now();
+                app.event(AppEvent::Clicked(mouse_pos.x, mouse_pos.y));
+                let elapsed = now.elapsed();
+                dbg!(elapsed);
+
+                window.request_redraw();
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let _pixels = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, delta) => -delta * 45.,
+                    // TODO probably invert this too
+                    winit::event::MouseScrollDelta::PixelDelta(delta) => delta.y as f32,
+                };
+
+                // app.main();
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                dbg!(event);
+                // info!("Received keyboard event");
+            }
+            WindowEvent::Resized(size) => {
+                app.event(AppEvent::Resize(size));
+                window.request_redraw();
+            }
+            _ => {}
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop, event: GlobalEvent) {
+        match event {
+            GlobalEvent::Dirty { hint } => {
+                self.app.hint_dirty(hint);
+            } // FlareEvent::LspEvent(event) => {
+              //     app.event(LspEvent(event));
+
+              //     target.set_control_flow(ControlFlow::Poll);
+              // }
+        }
+    }
+}
+
+pub(crate) struct Windows {
+    root: WindowId,
+    map: HashMap<WindowId, WindowData>,
+}
+
+impl Windows {
+    pub fn new(
+        window: winit::window::Window,
+        surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
+    ) -> Self {
+        let id = window.id();
+        let window_data = WindowData {
+            window,
+            surface,
+            mouse_pos: Point { x: 0, y: 0 },
+            parent: None,
+        };
+
+        Self {
+            root: id,
+            map: HashMap::from([(id, window_data)]),
+        }
+    }
+    pub fn root(&self) -> &winit::window::Window {
+        &self.map[&self.root].window
+    }
+
+    pub fn get_mut(&mut self, id: &WindowId) -> Option<&mut WindowData> {
+        self.map.get_mut(id)
+    }
+}
+
+pub struct WindowData {
+    window: winit::window::Window,
+    surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
+    mouse_pos: Point,
+    parent: Option<WindowId>,
 }
