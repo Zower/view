@@ -712,23 +712,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "flare-core"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "crop",
- "lsp-types",
- "miette",
- "serde",
- "serde_json",
- "slotmap",
- "strum",
- "tree-sitter",
- "tree-sitter-rust",
- "url",
-]
-
-[[package]]
 name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1500,6 +1483,71 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
 
 [[package]]
+name = "paladin"
+version = "0.1.0"
+dependencies = [
+ "bevy_reflect",
+ "cosmic-text",
+ "lsp-types",
+ "miette",
+ "paladin-core",
+ "paladin-view",
+ "tree-sitter",
+ "tree-sitter-rust",
+]
+
+[[package]]
+name = "paladin-core"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "crop",
+ "lsp-types",
+ "miette",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "strum",
+ "tree-sitter",
+ "tree-sitter-rust",
+ "url",
+]
+
+[[package]]
+name = "paladin-view"
+version = "0.1.0"
+dependencies = [
+ "bevy_reflect",
+ "bincode",
+ "bon",
+ "cosmic-text",
+ "crossbeam",
+ "enum_delegate",
+ "femtovg",
+ "glutin",
+ "glutin-winit",
+ "imgref",
+ "miette",
+ "paladin-view-macros",
+ "raw-window-handle",
+ "rgb",
+ "serde",
+ "swash",
+ "taffy",
+ "tungstenite",
+ "winit",
+]
+
+[[package]]
+name = "paladin-view-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.76",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1714,6 +1762,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f86ae463694029097b846d8f99fd5536740602ae00022c0c50c5600720b2f71"
 dependencies = [
  "bytemuck",
+ "serde",
 ]
 
 [[package]]
@@ -2425,54 +2474,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "view"
-version = "0.1.0"
-dependencies = [
- "bevy_reflect",
- "bincode",
- "bon",
- "cosmic-text",
- "crossbeam",
- "enum_delegate",
- "femtovg",
- "glutin",
- "glutin-winit",
- "imgref",
- "miette",
- "raw-window-handle",
- "rgb",
- "serde",
- "swash",
- "taffy",
- "tungstenite",
- "view-macros",
- "winit",
-]
-
-[[package]]
-name = "view-editor"
-version = "0.1.0"
-dependencies = [
- "bevy_reflect",
- "cosmic-text",
- "flare-core",
- "lsp-types",
- "miette",
- "tree-sitter",
- "tree-sitter-rust",
- "view",
-]
-
-[[package]]
-name = "view-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.76",
-]
 
 [[package]]
 name = "walkdir"

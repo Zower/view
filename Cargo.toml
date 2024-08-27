@@ -1,14 +1,14 @@
 [package]
-name = "view-editor"
+name = "paladin"
 version = "0.1.0"
 edition = "2021"
 
 [workspace]
-members = ["view", "view-macros", "flare-core"]
+members = ["paladin-view", "paladin-view-macros", "paladin-core"]
 
 [dependencies]
-view = { version = "0.1.0", path = "view" }
-editor = { version = "0.1.0", path = "flare-core", package = "flare-core" }
+paladin-view = { version = "0.1.0", path = "paladin-view" }
+paladinc = { version = "0.1.0", path = "paladin-core", package = "paladin-core" }
 bevy_reflect = "0.14.1"
 cosmic-text.workspace = true
 tree-sitter.workspace = true

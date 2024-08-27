@@ -4,6 +4,7 @@ use std::{
 };
 
 use bevy_reflect::{Reflect, TypeRegistry};
+use serde::{Deserialize, Serialize};
 use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
@@ -12,16 +13,18 @@ use crate::{
     ReflectStateTrait, View, ViewWidget, Widget,
 };
 
-pub struct App {
+pub(crate) struct App {
     tree: ElementTree,
     registry: TypeRegistry,
 }
 
 // Global events passed through from the event loop abstraction.
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
+#[doc(hidden)]
 pub(crate) enum AppEvent {
     Resize(PhysicalSize<u32>),
     Clicked(u32, u32),
+    Paint(PhysicalSize<u32>),
 }
 
 impl App {
@@ -40,7 +43,7 @@ impl App {
 }
 
 impl App {
-    pub(crate) fn event(&mut self, event: AppEvent) {
+    pub(crate) fn event(&mut self, event: AppEvent, canvas: &mut Canvas) {
         match event {
             AppEvent::Clicked(x, y) => {
                 for (_, node) in iter_elements_from(&self.tree.taffy, self.tree.root) {
@@ -75,6 +78,7 @@ impl App {
                     )
                     .expect("Root doesn't exist")
             }
+            AppEvent::Paint(size) => self.paint(size, canvas),
         }
 
         self.dirty()
@@ -124,7 +128,7 @@ impl App {
         self.hint_dirty(self.tree.root);
     }
 
-    pub(crate) fn paint(&mut self, size: winit::dpi::PhysicalSize<u32>, canvas: &mut Canvas) {
+    fn paint(&mut self, size: winit::dpi::PhysicalSize<u32>, canvas: &mut Canvas) {
         self.tree
             .taffy
             .compute_layout(

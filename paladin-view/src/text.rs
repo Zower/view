@@ -15,7 +15,7 @@ const GLYPH_PADDING: u32 = 1;
 const GLYPH_MARGIN: u32 = 1;
 const TEXTURE_SIZE: usize = 512;
 
-pub(crate) fn init_cache() -> RenderCache {
+pub fn init_cache() -> RenderCache {
     // Text stuff
     let mut font_system = FontSystem::new();
 

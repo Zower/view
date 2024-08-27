@@ -1,7 +1,7 @@
 use std::io;
 
-use editor::{lsp::LspResponseTransmitter, SimpleBuffer};
-use view::prelude::*;
+use paladin_view::prelude::*;
+use paladinc::{lsp::LspResponseTransmitter, SimpleBuffer};
 
 use crate::BufferElement;
 
@@ -33,14 +33,14 @@ impl View for MyView {
             impl LspResponseTransmitter for Fake {
                 type Error = io::Error;
 
-                fn send(&self, event: editor::lsp::LspResponse) -> Result<(), Self::Error> {
+                fn send(&self, event: paladinc::lsp::LspResponse) -> Result<(), Self::Error> {
                     // dbg!(event);
 
                     Ok(())
                 }
             }
 
-            editor::Buffer::create(simple, ".".into(), Fake).unwrap()
+            paladinc::Buffer::create(simple, ".".into(), Fake).unwrap()
         }),))
     }
 }

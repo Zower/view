@@ -1,10 +1,9 @@
 use std::{
     fmt::Debug,
-    io::{self, BufRead, Stdin, Write},
     ops::{Deref, DerefMut},
 };
 
-use app::App;
+use app::{App, AppEvent};
 use bevy_reflect::{reflect_trait, Reflect, TypeRegistry};
 
 pub mod app;
@@ -12,8 +11,13 @@ mod elements;
 pub mod patch;
 pub mod prelude;
 mod runner;
+
 mod start;
 mod text;
+
+#[doc(hidden)]
+pub mod surrogate;
+
 mod utils;
 
 pub mod reflect {
@@ -24,7 +28,10 @@ pub mod taffy {
     pub use taffy::*;
 }
 
-use serde::{Deserialize, Serialize};
+use imgref::ImgVec;
+use miette::IntoDiagnostic;
+use rgb::{RGB8, RGBA8};
+use serde::{de::IntoDeserializer, Deserialize, Serialize};
 use taffy::NodeId;
 pub use utils::*;
 
@@ -46,17 +53,40 @@ pub struct Color(femtovg::Color);
 /// Run the app.
 /// Call this once with your top level view.
 pub fn run<V: View>(v: V) -> crate::Result<()> {
-    let (mut socket, response) =
+    let (mut socket, _response) =
         tungstenite::connect("ws://localhost:9001/socket").expect("Can't connect");
 
     loop {
-        let msg = socket.read().expect("Error reading message");
+        // let msg = socket.read().expect("Error reading message");
 
-        dbg!(&msg);
+        // if msg.is_ping() {
+        //     socket.send(tungstenite::Message::Pong(vec![])).unwrap();
+        // }
 
-        if msg.is_ping() {
-            socket.send(tungstenite::Message::Pong(vec![])).unwrap();
-        }
+        socket
+            .write(tungstenite::Message::Binary(
+                bincode::serialize(&SurrogateMessage::FromClient(ClientMessage::Update(
+                    "Hey".into(),
+                )))
+                .into_diagnostic()?,
+            ))
+            .into_diagnostic()?;
+
+        dbg!("Written!");
+
+        socket.flush().unwrap();
+
+        let tungstenite::Message::Binary(binary) = socket.read().unwrap() else {
+            panic!();
+        };
+
+        let message = bincode::deserialize::<SurrogateMessage>(&binary).unwrap();
+
+        let SurrogateMessage::FromServer(msg) = message else {
+            panic!()
+        };
+
+        dbg!(msg);
 
         // if ms
     }
@@ -68,8 +98,6 @@ pub fn run<V: View>(v: V) -> crate::Result<()> {
 
     //     dbg!(msg);
     // }
-
-    return Ok(());
 
     let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
 
@@ -161,9 +189,29 @@ impl<T: View + 'static> Element for T {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub enum SurrogateMessage {
-    Ping,
-    Pong,
+pub(crate) enum SurrogateMessage {
+    FromClient(ClientMessage),
+    FromServer(ServerMessage),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) enum ClientMessage {
+    Update(String),
+    Frame(Frame),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct Frame {
+    data: Vec<RGBA8>,
+    height: usize,
+    width: usize,
+    stride: usize,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) enum ServerMessage {
+    Init(String),
+    AppEvent(AppEvent),
 }
 
 /// Mostly a hack around functions being monomorphized at the call-site.
@@ -215,7 +263,7 @@ pub trait Element: 'static {
 /// Views are the building blocks of an application. They can be used to compose other views, elements, and any mix of the two.
 ///
 /// ```
-/// # use view::prelude::*;
+/// # use paladin_view::prelude::*;
 ///
 /// #[derive(Reflect)]
 /// struct CounterState(u32);
@@ -253,7 +301,7 @@ pub trait DynView: Reflect {
 
 /// A painting context. Mostly a wrapper around [femtovg::Canvas].
 pub struct Canvas {
-    inner: femtovg::Canvas<OpenGl>,
+    pub inner: femtovg::Canvas<OpenGl>,
     pub text_cache: text::RenderCache,
 }
 
@@ -296,7 +344,7 @@ pub trait Reducer<M> {
 /// State is the only way to change a view and expect it to corrextly re-render.
 /// Since we use reflection, state must be stored as a field on a struct implementing [View] for it to work as expected.
 /// ```
-/// # use view::prelude::*;
+/// # use paladin_view::prelude::*;
 ///
 /// #[derive(Reflect)]
 /// struct CounterState(u32);

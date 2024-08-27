@@ -2,12 +2,12 @@ use std::path::PathBuf;
 
 use components::root::Root;
 
-use editor::ts::highlight;
 use miette::IntoDiagnostic;
-use view::{prelude::*, CustomWidget};
+use paladin_view::{prelude::*, CustomWidget};
+use paladinc::ts::highlight;
 mod components;
 
-fn main() -> view::Result<()> {
+fn main() -> paladin_view::Result<()> {
     run(Root)
 }
 
@@ -16,13 +16,13 @@ pub struct BufferElement<F> {
 }
 
 struct BufferWidget {
-    buffer: editor::Buffer,
-    text: view::Text,
+    buffer: paladinc::Buffer,
+    text: paladin_view::Text,
     qc: tree_sitter::QueryCursor,
     query: tree_sitter::Query,
 }
 
-impl<F: Fn() -> editor::Buffer + 'static> BufferElement<F> {
+impl<F: Fn() -> paladinc::Buffer + 'static> BufferElement<F> {
     pub fn new(f: F) -> impl Element {
         Self { create: f }
     }
@@ -37,8 +37,8 @@ impl Widget for BufferWidget {
     }
 }
 
-impl<F: Fn() -> editor::Buffer + 'static> Element for BufferElement<F> {
-    fn insert(self, context: &mut impl view::InsertContext) {
+impl<F: Fn() -> paladinc::Buffer + 'static> Element for BufferElement<F> {
+    fn insert(self, context: &mut impl paladin_view::InsertContext) {
         let mut qc = tree_sitter::QueryCursor::new();
         let query = tree_sitter::Query::new(
             &tree_sitter_rust::language(),
@@ -59,31 +59,33 @@ impl<F: Fn() -> editor::Buffer + 'static> Element for BufferElement<F> {
             query,
         };
 
-        context.insert(view::MountedWidget::Custom(CustomWidget(Box::new(widget))));
+        context.insert(paladin_view::MountedWidget::Custom(CustomWidget(Box::new(
+            widget,
+        ))));
     }
 
     fn compare_rebuild(
         self,
-        old: view::MountedWidget,
-        context: &mut impl view::RebuildContext,
-    ) -> view::CompareResult<impl Element> {
-        let view::MountedWidget::Custom(CustomWidget(custom)) = old else {
-            return view::CompareResult::Replace { with: self };
+        old: paladin_view::MountedWidget,
+        context: &mut impl paladin_view::RebuildContext,
+    ) -> paladin_view::CompareResult<impl Element> {
+        let paladin_view::MountedWidget::Custom(CustomWidget(custom)) = old else {
+            return paladin_view::CompareResult::Replace { with: self };
         };
 
         let Ok(old) = custom.into_any().downcast::<BufferWidget>() else {
-            return view::CompareResult::Replace { with: self };
+            return paladin_view::CompareResult::Replace { with: self };
         };
 
         // no need to replace
-        context.insert(view::MountedWidget::Custom(CustomWidget(old)));
+        context.insert(paladin_view::MountedWidget::Custom(CustomWidget(old)));
 
-        return view::CompareResult::Success;
+        return paladin_view::CompareResult::Success;
     }
 }
 
 fn get_rich_text_content(
-    editor_buffer: &editor::Buffer,
+    editor_buffer: &paladinc::Buffer,
     start_line: usize,
     length: usize,
     ts_cursor: &mut tree_sitter::QueryCursor,

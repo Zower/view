@@ -6,14 +6,14 @@ use syn::{parse_macro_input, DeriveInput};
 pub fn derive(input: TokenStream) -> TokenStream {
     let DeriveInput { ident, .. } = parse_macro_input!(input);
     let output = quote! {
-        impl ::view::DynView for #ident {
-            fn register(&self, registry: &mut ::view::reflect::TypeRegistry) {
+        impl ::paladin_view::DynView for #ident {
+            fn register(&self, registry: &mut ::paladin_view::reflect::TypeRegistry) {
                 registry.register::<#ident>();
                 #ident::register_type_dependencies(registry);
             }
 
-            fn dyn_cmp(&self, child_id: ::view::taffy::NodeId, tree: &mut ::view::app::ElementTree, registry: &mut ::view::reflect::TypeRegistry) {
-                ::view::app::iter_elements_cmp(tree, child_id, self.build(), registry)
+            fn dyn_cmp(&self, child_id: ::paladin_view::taffy::NodeId, tree: &mut ::paladin_view::app::ElementTree, registry: &mut ::paladin_view::reflect::TypeRegistry) {
+                ::paladin_view::app::iter_elements_cmp(tree, child_id, self.build(), registry)
             }
         }
     };
@@ -25,7 +25,7 @@ pub fn view(_metadata: TokenStream, input: TokenStream) -> proc_macro::TokenStre
     let input: proc_macro2::TokenStream = input.into();
 
     let output = quote! {
-        use ::view::reflect::*;
+        use ::paladin_view::reflect::*;
         #[derive(Reflect, DynView)]
         #input
     };

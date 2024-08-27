@@ -60,7 +60,7 @@ pub trait Widget {
     /// This is where state updates happen.
     ///
     /// ```
-    /// use view::prelude::*;
+    /// use paladin_view::prelude::*;
     ///
     /// // A button that stores a dynamic function that could send a message, update a mutex, or similar.
     /// struct Button(Box<dyn Fn()>);
@@ -90,7 +90,7 @@ pub trait Widget {
     ///
     /// Do not use the canvas for rendering inside the layout function.
     /// ```
-    /// # use view::prelude::*;
+    /// # use paladin_view::prelude::*;
     ///
     /// struct Text(cosmic_text::Buffer);
     ///
@@ -113,7 +113,7 @@ pub trait Widget {
 
     /// Painting.
     /// ```
-    /// # use view::prelude::*;
+    /// # use paladin_view::prelude::*;
     ///
     /// struct FixedRect;
     ///
@@ -208,7 +208,7 @@ mod button {
         ///
         /// See also [State].
         /// ```
-        /// # use view::prelude::*;
+        /// # use paladin_view::prelude::*;
         /// #[view]
         /// struct Printer;
         ///
@@ -305,7 +305,7 @@ mod text {
         /// Like all widgets, uses the builder syntax from [bon].
         /// ```
         ///
-        /// # use view::prelude::*;
+        /// # use paladin_view::prelude::*;
         ///
         /// Text::builder().text("Hello!").size(28.).build();
         ///
@@ -483,7 +483,7 @@ mod stack {
     /// A horizontal stack, also called a Row.
     ///
     /// ```
-    /// # use view::prelude::*;
+    /// # use paladin_view::prelude::*;
     ///
     /// hstack(
     ///     (
@@ -515,7 +515,7 @@ pub(crate) mod prelude {
 ///
 /// ```compile_fail
 ///
-/// # use view::prelude::*;
+/// # use paladin_view::prelude::*;
 /// # let some_condition = true;
 ///
 /// if some_condition {
@@ -528,7 +528,7 @@ pub(crate) mod prelude {
 /// Instead, use OneOf with its convenience function [OneOfSwizz::left] and [OneOfSwizz::right]:
 ///
 /// ```
-/// # use view::prelude::*;
+/// # use paladin_view::prelude::*;
 /// # let some_condition = true;
 ///
 /// let _ = if some_condition {

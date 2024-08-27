@@ -16,15 +16,13 @@ use winit::{
     window::{Icon, WindowAttributes},
 };
 
-use crate::GlobalEvent;
-
-pub(crate) fn create_event_loop(
+pub fn create_event_loop<T>(
     width: u32,
     height: u32,
     title: &'static str,
 ) -> (
     Canvas<OpenGl>,
-    EventLoop<GlobalEvent>,
+    EventLoop<T>,
     glutin::context::PossiblyCurrentContext,
     glutin::surface::Surface<WindowSurface>,
     winit::window::Window,
@@ -77,8 +75,8 @@ pub fn _new_window(
     (surface, window)
 }
 
-fn create_gl_context_and_window(
-    event_loop: &EventLoop<GlobalEvent>,
+fn create_gl_context_and_window<T>(
+    event_loop: &EventLoop<T>,
     width: u32,
     height: u32,
     title: &'static str,

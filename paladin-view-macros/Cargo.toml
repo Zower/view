@@ -1,5 +1,5 @@
 [package]
-name = "view-macros"
+name = "paladin-view-macros"
 version = "0.1.0"
 edition = "2021"
 

@@ -1,6 +1,5 @@
 use std::{collections::HashMap, time::Instant};
 
-use femtovg::ImageFlags;
 use glutin::{prelude::PossiblyCurrentGlContext, surface::GlSurface};
 use miette::IntoDiagnostic;
 use winit::{
@@ -79,42 +78,7 @@ impl ApplicationHandler<GlobalEvent> for Runner {
                     femtovg::Color::black(),
                 );
 
-                app.paint(window.inner_size(), canvas);
-
-                // let sc = canvas.screenshot().unwrap();
-
-                // canvas.clear_rect(
-                //     0,
-                //     0,
-                //     window.inner_size().width,
-                //     window.inner_size().height,
-                //     femtovg::Color::black(),
-                // );
-
-                // canvas.flush();
-
-                // let image = canvas
-                //     .create_image(sc.as_ref(), ImageFlags::empty())
-                //     .unwrap();
-
-                // let fill_paint = femtovg::Paint::image(
-                //     image,
-                //     0.0,
-                //     0.0,
-                //     window.inner_size().width as f32,
-                //     window.inner_size().height as f32,
-                //     0.0,
-                //     1.0,
-                // );
-
-                // let mut path = femtovg::Path::new();
-                // path.rect(
-                //     0.0,
-                //     0.0,
-                //     window.inner_size().width as f32,
-                //     window.inner_size().height as f32,
-                // );
-                // canvas.fill_path(&path, &fill_paint);
+                app.event(AppEvent::Paint(window.inner_size()), canvas);
 
                 canvas.flush();
 
@@ -136,7 +100,7 @@ impl ApplicationHandler<GlobalEvent> for Runner {
                 ..
             } => {
                 let now = Instant::now();
-                app.event(AppEvent::Clicked(mouse_pos.x, mouse_pos.y));
+                app.event(AppEvent::Clicked(mouse_pos.x, mouse_pos.y), canvas);
                 let elapsed = now.elapsed();
                 dbg!(elapsed);
 
@@ -156,7 +120,7 @@ impl ApplicationHandler<GlobalEvent> for Runner {
                 // info!("Received keyboard event");
             }
             WindowEvent::Resized(size) => {
-                app.event(AppEvent::Resize(size));
+                app.event(AppEvent::Resize(size), canvas);
                 canvas.set_size(size.width, size.height, window.scale_factor() as f32);
                 window.request_redraw();
             }
@@ -204,14 +168,18 @@ impl Windows {
         &self.map[&self.root].window
     }
 
+    pub fn iter(&self) -> impl Iterator<Item = (&WindowId, &WindowData)> {
+        self.map.iter()
+    }
+
     pub fn get_mut(&mut self, id: &WindowId) -> Option<&mut WindowData> {
         self.map.get_mut(id)
     }
 }
 
-pub struct WindowData {
-    window: winit::window::Window,
-    surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
-    mouse_pos: Point,
-    parent: Option<WindowId>,
+pub(crate) struct WindowData {
+    pub(crate) window: winit::window::Window,
+    pub(crate) surface: glutin::surface::Surface<glutin::surface::WindowSurface>,
+    pub(crate) mouse_pos: Point,
+    pub(crate) parent: Option<WindowId>,
 }

@@ -4,4 +4,4 @@ pub use crate::{
     Widget,
 };
 pub use bevy_reflect::{GetTypeRegistration, Reflect};
-pub use view_macros::*;
+pub use paladin_view_macros::*;
