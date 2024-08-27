@@ -1,5 +1,6 @@
 use std::{collections::HashMap, time::Instant};
 
+use femtovg::ImageFlags;
 use glutin::{prelude::PossiblyCurrentGlContext, surface::GlSurface};
 use miette::IntoDiagnostic;
 use winit::{
@@ -80,6 +81,41 @@ impl ApplicationHandler<GlobalEvent> for Runner {
 
                 app.paint(window.inner_size(), canvas);
 
+                // let sc = canvas.screenshot().unwrap();
+
+                // canvas.clear_rect(
+                //     0,
+                //     0,
+                //     window.inner_size().width,
+                //     window.inner_size().height,
+                //     femtovg::Color::black(),
+                // );
+
+                // canvas.flush();
+
+                // let image = canvas
+                //     .create_image(sc.as_ref(), ImageFlags::empty())
+                //     .unwrap();
+
+                // let fill_paint = femtovg::Paint::image(
+                //     image,
+                //     0.0,
+                //     0.0,
+                //     window.inner_size().width as f32,
+                //     window.inner_size().height as f32,
+                //     0.0,
+                //     1.0,
+                // );
+
+                // let mut path = femtovg::Path::new();
+                // path.rect(
+                //     0.0,
+                //     0.0,
+                //     window.inner_size().width as f32,
+                //     window.inner_size().height as f32,
+                // );
+                // canvas.fill_path(&path, &fill_paint);
+
                 canvas.flush();
 
                 surface
@@ -121,6 +157,7 @@ impl ApplicationHandler<GlobalEvent> for Runner {
             }
             WindowEvent::Resized(size) => {
                 app.event(AppEvent::Resize(size));
+                canvas.set_size(size.width, size.height, window.scale_factor() as f32);
                 window.request_redraw();
             }
             _ => {}

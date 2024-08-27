@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    io::{self, BufRead, Stdin, Write},
     ops::{Deref, DerefMut},
 };
 
@@ -23,6 +24,7 @@ pub mod taffy {
     pub use taffy::*;
 }
 
+use serde::{Deserialize, Serialize};
 use taffy::NodeId;
 pub use utils::*;
 
@@ -44,6 +46,31 @@ pub struct Color(femtovg::Color);
 /// Run the app.
 /// Call this once with your top level view.
 pub fn run<V: View>(v: V) -> crate::Result<()> {
+    let (mut socket, response) =
+        tungstenite::connect("ws://localhost:9001/socket").expect("Can't connect");
+
+    loop {
+        let msg = socket.read().expect("Error reading message");
+
+        dbg!(&msg);
+
+        if msg.is_ping() {
+            socket.send(tungstenite::Message::Pong(vec![])).unwrap();
+        }
+
+        // if ms
+    }
+    // let mut websocket = tungstenite::accept(stream.unwrap()).unwrap();
+    // websocket.send(tungstenite::Message::Ping(vec![])).unwrap();
+
+    // loop {
+    //     let msg = websocket.read().unwrap();
+
+    //     dbg!(msg);
+    // }
+
+    return Ok(());
+
     let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
 
     let app = App::new(v, window.inner_size());
@@ -131,6 +158,12 @@ impl<T: View + 'static> Element for T {
 
         return CompareResult::Success;
     }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum SurrogateMessage {
+    Ping,
+    Pong,
 }
 
 /// Mostly a hack around functions being monomorphized at the call-site.
@@ -287,7 +320,7 @@ pub trait Reducer<M> {
 ///
 /// ```
 pub struct State<M: Clone + 'static, S: Reducer<M> + 'static> {
-    #[reflect(ignore)]
+    // #[reflect(ignore)]
     state: Option<S>,
     #[reflect(ignore)]
     // TODO: Should also be optional. No need to allocated if we haven't initted state yet.

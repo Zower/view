@@ -34,7 +34,7 @@ impl View for MyView {
                 type Error = io::Error;
 
                 fn send(&self, event: editor::lsp::LspResponse) -> Result<(), Self::Error> {
-                    dbg!(event);
+                    // dbg!(event);
 
                     Ok(())
                 }
