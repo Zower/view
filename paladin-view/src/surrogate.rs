@@ -74,7 +74,7 @@ async fn run_internal(
     dbg!("New connection");
 
     // Let's spawn the handling of each connection in a separate task.
-    while let Ok((stream, addr)) = listener.accept().await {
+    while let Ok((stream, _)) = listener.accept().await {
         let proxy = proxy.clone();
         let receiver = receiver.clone();
         let ws_stream = async_tungstenite::accept_async(stream)
@@ -84,10 +84,14 @@ async fn run_internal(
         let (mut write, read) = ws_stream.split();
 
         async_std::task::spawn(async move {
-            for message in receiver.recv().await {
-                write.send(tungstenite::Message::Binary(
-                    bincode::serialize(&message).unwrap(),
-                ));
+            loop {
+                let message = receiver.recv().await.unwrap();
+                write
+                    .send(tungstenite::Message::Binary(
+                        bincode::serialize(&SurrogateMessage::FromServer(message)).unwrap(),
+                    ))
+                    .await
+                    .unwrap();
             }
         });
 
@@ -108,7 +112,7 @@ async fn run_internal(
                             panic!()
                         };
 
-                        dbg!(&message);
+                        // dbg!(&message);
                         proxy.send_event(message).unwrap();
                     }
                     Err(tungstenite::Error::ConnectionClosed) => {
@@ -171,6 +175,8 @@ impl ApplicationHandler<ClientMessage> for SurrogateRunner {
                     .make_current(&surface)
                     .expect("Making current to work");
 
+                dbg!(&last_frame.is_some());
+
                 if let Some(last_frame) = last_frame.take() {
                     let data = Img::new(last_frame.data, last_frame.width, last_frame.height);
 
@@ -193,7 +199,7 @@ impl ApplicationHandler<ClientMessage> for SurrogateRunner {
                     path.rect(0.0, 0.0, last_frame.width as f32, last_frame.height as f32);
                     canvas.fill_path(&path, &fill_paint);
 
-                    canvas.delete_image(image);
+                    // canvas.delete_image(image);
                 }
 
                 canvas.flush();
@@ -215,6 +221,12 @@ impl ApplicationHandler<ClientMessage> for SurrogateRunner {
                 state: ElementState::Pressed,
                 ..
             } => {
+                sender
+                    .send_blocking(ServerMessage::AppEvent(AppEvent::Clicked(
+                        mouse_pos.x,
+                        mouse_pos.y,
+                    )))
+                    .unwrap();
                 // app.event(AppEvent::Clicked(mouse_pos.x, mouse_pos.y), canvas);
 
                 window.request_redraw();

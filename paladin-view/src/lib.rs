@@ -50,70 +50,101 @@ pub type Size = taffy::Size<u32>;
 pub type Rect = taffy::Rect<u32>;
 pub struct Color(femtovg::Color);
 
+use async_tungstenite::tungstenite;
+use winit::dpi::PhysicalSize;
+
 /// Run the app.
 /// Call this once with your top level view.
 pub fn run<V: View>(v: V) -> crate::Result<()> {
     let (mut socket, _response) =
-        tungstenite::connect("ws://localhost:9001/socket").expect("Can't connect");
+        tungstenite::connect("ws://localhost:9001/socket").into_diagnostic()?;
+
+    // let msg = socket.read().expect("Error reading message");
+
+    // if msg.is_ping() {
+    //     socket.send(tungstenite::Message::Pong(vec![])).unwrap();
+    // }
+
+    // socket
+    //     .write(tungstenite::Message::Binary(
+    //         bincode::serialize(&SurrogateMessage::FromClient(ClientMessage::Update(
+    //             "Hey".into(),
+    //         )))
+    //         .into_diagnostic()?,
+    //     ))
+    //     .into_diagnostic()?;
+
+    // dbg!("Written!");
+
+    // socket.flush().unwrap();
+
+    let (canvas, el, pcc, surface, window, _config) =
+        start::create_event_loop::<()>(800, 600, "view");
+
+    let mut app = App::new(v, PhysicalSize::new(300, 400));
+    let cache = text::init_cache();
+
+    let mut canvas = Canvas {
+        inner: canvas,
+        text_cache: cache,
+    };
 
     loop {
-        // let msg = socket.read().expect("Error reading message");
-
-        // if msg.is_ping() {
-        //     socket.send(tungstenite::Message::Pong(vec![])).unwrap();
-        // }
-
-        socket
-            .write(tungstenite::Message::Binary(
-                bincode::serialize(&SurrogateMessage::FromClient(ClientMessage::Update(
-                    "Hey".into(),
-                )))
-                .into_diagnostic()?,
-            ))
-            .into_diagnostic()?;
-
-        dbg!("Written!");
-
-        socket.flush().unwrap();
-
         let tungstenite::Message::Binary(binary) = socket.read().unwrap() else {
             panic!();
         };
 
-        let message = bincode::deserialize::<SurrogateMessage>(&binary).unwrap();
-
-        let SurrogateMessage::FromServer(msg) = message else {
+        let SurrogateMessage::FromServer(message) =
+            bincode::deserialize::<SurrogateMessage>(&binary).unwrap()
+        else {
             panic!()
         };
 
-        dbg!(msg);
+        dbg!(&message);
 
-        // if ms
+        match message {
+            ServerMessage::Init(_) => {
+                dbg!("idk");
+            }
+            ServerMessage::AppEvent(it) => {
+                let is_paint = matches!(it, AppEvent::Paint(_));
+                app.event(it, &mut canvas);
+
+                canvas.flush();
+
+                if is_paint {
+                    let sc = canvas.screenshot().unwrap();
+
+                    let width = sc.width();
+                    let height = sc.height();
+                    let stride = sc.stride();
+
+                    let frame = Frame {
+                        data: sc.into_buf(),
+                        width,
+                        height,
+                        stride,
+                    };
+
+                    socket
+                        .send(tungstenite::Message::Binary(
+                            bincode::serialize(&SurrogateMessage::FromClient(
+                                ClientMessage::Frame(frame),
+                            ))
+                            .unwrap(),
+                        ))
+                        .unwrap();
+                }
+            }
+        }
     }
-    // let mut websocket = tungstenite::accept(stream.unwrap()).unwrap();
-    // websocket.send(tungstenite::Message::Ping(vec![])).unwrap();
 
-    // loop {
-    //     let msg = websocket.read().unwrap();
-
-    //     dbg!(msg);
+    // Runner {
+    //     app,
+    //     windows: Windows::new(window, surface),
+    //     gl_context: pcc,
     // }
-
-    let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
-
-    let app = App::new(v, window.inner_size());
-    let cache = text::init_cache();
-
-    Runner {
-        app,
-        canvas: Canvas {
-            inner: canvas,
-            text_cache: cache,
-        },
-        windows: Windows::new(window, surface),
-        gl_context: pcc,
-    }
-    .run(el)
+    // .run(el)
 }
 
 impl<T: View + 'static> Element for T {

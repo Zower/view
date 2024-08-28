@@ -4,7 +4,7 @@ use femtovg::{renderer::OpenGl, Canvas};
 
 use glutin::{
     config::ConfigTemplateBuilder,
-    context::{ContextApi, ContextAttributesBuilder},
+    context::{ContextApi, ContextAttributesBuilder, NotCurrentContext},
     display::GetGlDisplay,
     prelude::*,
     surface::{SurfaceAttributesBuilder, WindowSurface},
@@ -73,6 +73,63 @@ pub fn _new_window(
     };
 
     (surface, window)
+}
+
+pub fn test(width: u32, height: u32) -> (EventLoop<()>, Canvas<OpenGl>, NotCurrentContext) {
+    let event_loop = EventLoop::with_user_event().build().unwrap();
+
+    let display_builder = DisplayBuilder::new().with_window_attributes(None);
+
+    let template = ConfigTemplateBuilder::new().with_alpha_size(8);
+
+    let (None, gl_config) = display_builder
+        .build(&event_loop, template, |configs| {
+            // Find the config with the maximum number of samples, so our triangle will
+            // be smooth.
+            configs
+                .reduce(|accum, config| {
+                    let transparency_check = config.supports_transparency().unwrap_or(false)
+                        & !accum.supports_transparency().unwrap_or(false);
+
+                    if transparency_check || config.num_samples() < accum.num_samples() {
+                        config
+                    } else {
+                        accum
+                    }
+                })
+                .unwrap()
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+
+    let gl_display = gl_config.display();
+
+    let fallback_context_attributes = ContextAttributesBuilder::new()
+        .with_context_api(ContextApi::Gles(None))
+        .build(None);
+
+    let not_current_gl_context = Some(unsafe {
+        gl_display
+            .create_context(&gl_config, &fallback_context_attributes)
+            .unwrap()
+    });
+
+    // let gl_context = not_current_gl_context
+    //     .take()
+    //     .unwrap()
+    //     .make_current(&surface)
+    //     .unwrap();
+
+    let renderer =
+        unsafe { OpenGl::new_from_function_cstr(|s| gl_display.get_proc_address(s) as *const _) }
+            .expect("Cannot create renderer");
+
+    let mut canvas = Canvas::new(renderer).expect("Cannot create canvas");
+    canvas.set_size(width, height, 1 as f32);
+
+    (event_loop, canvas, not_current_gl_context.unwrap())
 }
 
 fn create_gl_context_and_window<T>(
