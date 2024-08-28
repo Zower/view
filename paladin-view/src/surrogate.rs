@@ -1,14 +1,15 @@
 use std::thread;
 
-use crossbeam::channel::Select;
+use async_std::net::TcpListener;
+use async_tungstenite::{accept_async, async_std::connect_async, tungstenite};
+use futures::{SinkExt, StreamExt};
 use glutin::{prelude::PossiblyCurrentGlContext, surface::GlSurface};
 use imgref::Img;
 use miette::IntoDiagnostic;
-use rgb::RGBA8;
-use tungstenite::util::NonBlockingResult;
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, WindowEvent},
+    event_loop::EventLoopProxy,
 };
 
 use crate::{
@@ -22,64 +23,23 @@ struct SurrogateRunner {
     canvas: Canvas,
     windows: Windows,
     gl_context: glutin::context::PossiblyCurrentContext,
-    sender: crossbeam::channel::Sender<ServerMessage>,
+    sender: async_std::channel::Sender<ServerMessage>,
     last_frame: Option<Frame>,
 }
 
 pub fn run() -> miette::Result<()> {
-    let server = std::net::TcpListener::bind("127.0.0.1:9001").into_diagnostic()?;
-
-    let (sender, receiver) = crossbeam::channel::unbounded::<ServerMessage>();
+    // let server = std::net::TcpListener::bind("127.0.0.1:9001").into_diagnostic()?;
 
     let (canvas, el, pcc, surface, window, _config) =
         crate::start::create_event_loop(800, 600, "view");
 
     let proxy = el.create_proxy();
 
-    thread::spawn::<_, miette::Result<()>>(move || 'accept: loop {
-        let (stream, _) = server.accept().into_diagnostic()?;
-        let mut socket = tungstenite::accept(stream).into_diagnostic()?;
+    let (server_message_sender, server_message_receiver) =
+        async_std::channel::unbounded::<ServerMessage>();
 
-        dbg!("New connection");
-
-        loop {
-            match socket.read() {
-                Ok(message) => {
-                    let SurrogateMessage::FromClient(message) = (match message {
-                        tungstenite::Message::Binary(message) => {
-                            bincode::deserialize::<SurrogateMessage>(&message).into_diagnostic()?
-                        }
-                        tungstenite::Message::Close(_) => continue,
-                        msg => {
-                            dbg!(msg);
-                            continue;
-                        }
-                    }) else {
-                        panic!()
-                    };
-
-                    dbg!(&message);
-                    proxy.send_event(message).unwrap();
-                }
-                Err(tungstenite::Error::ConnectionClosed) => {
-                    panic!();
-                    dbg!("Closed, continue");
-
-                    continue 'accept;
-                }
-                Err(err) => {
-                    panic!();
-                    Err(err).into_diagnostic()?
-                }
-            }
-        }
-    });
-
-    thread::spawn(move || {
-        // crossbeam::select! {
-        //     recv(receiver) -> msg => { dbg!(msg.unwrap()); }
-        //     recv(receive_message_receiver) -> msg => { () }
-        // }
+    thread::spawn::<_, miette::Result<()>>(move || {
+        async_std::task::block_on(run_internal(proxy, server_message_receiver))
     });
 
     window.set_visible(true);
@@ -95,10 +55,80 @@ pub fn run() -> miette::Result<()> {
         },
         windows: Windows::new(window, surface),
         gl_context: pcc,
-        sender,
+        sender: server_message_sender,
         last_frame: None,
     })
     .into_diagnostic()
+}
+
+async fn run_internal(
+    proxy: EventLoopProxy<ClientMessage>,
+    receiver: async_std::channel::Receiver<ServerMessage>,
+) -> miette::Result<()> {
+    // let (stream, _) = connect_async("127.0.0.1:9001").await.into_diagnostic()?;
+
+    let listener = TcpListener::bind("127.0.0.1:9001")
+        .await
+        .into_diagnostic()?;
+
+    dbg!("New connection");
+
+    // Let's spawn the handling of each connection in a separate task.
+    while let Ok((stream, addr)) = listener.accept().await {
+        let proxy = proxy.clone();
+        let receiver = receiver.clone();
+        let ws_stream = async_tungstenite::accept_async(stream)
+            .await
+            .expect("Error during the websocket handshake occurred");
+
+        let (mut write, read) = ws_stream.split();
+
+        async_std::task::spawn(async move {
+            for message in receiver.recv().await {
+                write.send(tungstenite::Message::Binary(
+                    bincode::serialize(&message).unwrap(),
+                ));
+            }
+        });
+
+        async_std::task::spawn(async move {
+            read.for_each(|message| {
+                match message {
+                    Ok(message) => {
+                        let SurrogateMessage::FromClient(message) = (match message {
+                            tungstenite::Message::Binary(message) => {
+                                bincode::deserialize::<SurrogateMessage>(&message).unwrap()
+                            }
+                            tungstenite::Message::Close(_) => return futures::future::ready(()),
+                            msg => {
+                                dbg!(msg);
+                                return futures::future::ready(());
+                            }
+                        }) else {
+                            panic!()
+                        };
+
+                        dbg!(&message);
+                        proxy.send_event(message).unwrap();
+                    }
+                    Err(tungstenite::Error::ConnectionClosed) => {
+                        panic!();
+                        dbg!("Closed, continue");
+                    }
+                    Err(err) => {
+                        panic!();
+                        // Err(err).into_diagnostic()?
+                    }
+                };
+
+                futures::future::ready(())
+            })
+            .await;
+        })
+        .await;
+    }
+
+    loop {}
 }
 
 impl ApplicationHandler<ClientMessage> for SurrogateRunner {
@@ -132,7 +162,7 @@ impl ApplicationHandler<ClientMessage> for SurrogateRunner {
         match event {
             WindowEvent::RedrawRequested => {
                 sender
-                    .send(ServerMessage::AppEvent(AppEvent::Paint(
+                    .send_blocking(ServerMessage::AppEvent(AppEvent::Paint(
                         window.inner_size(),
                     )))
                     .unwrap();
