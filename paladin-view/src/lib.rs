@@ -59,27 +59,7 @@ pub fn run<V: View>(v: V) -> crate::Result<()> {
     let (mut socket, _response) =
         tungstenite::connect("ws://localhost:9001/socket").into_diagnostic()?;
 
-    // let msg = socket.read().expect("Error reading message");
-
-    // if msg.is_ping() {
-    //     socket.send(tungstenite::Message::Pong(vec![])).unwrap();
-    // }
-
-    // socket
-    //     .write(tungstenite::Message::Binary(
-    //         bincode::serialize(&SurrogateMessage::FromClient(ClientMessage::Update(
-    //             "Hey".into(),
-    //         )))
-    //         .into_diagnostic()?,
-    //     ))
-    //     .into_diagnostic()?;
-
-    // dbg!("Written!");
-
-    // socket.flush().unwrap();
-
-    let (canvas, el, pcc, surface, window, _config) =
-        start::create_event_loop::<()>(800, 600, "view");
+    let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
 
     let mut app = App::new(v, PhysicalSize::new(300, 400));
     let cache = text::init_cache();
@@ -99,8 +79,6 @@ pub fn run<V: View>(v: V) -> crate::Result<()> {
         else {
             panic!()
         };
-
-        dbg!(&message);
 
         match message {
             ServerMessage::Init(_) => {
@@ -139,12 +117,13 @@ pub fn run<V: View>(v: V) -> crate::Result<()> {
         }
     }
 
-    // Runner {
-    //     app,
-    //     windows: Windows::new(window, surface),
-    //     gl_context: pcc,
-    // }
-    // .run(el)
+    Runner {
+        app,
+        windows: Windows::new(window, surface),
+        gl_context: pcc,
+        canvas,
+    }
+    .run(el)
 }
 
 impl<T: View + 'static> Element for T {

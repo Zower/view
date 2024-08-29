@@ -65,8 +65,6 @@ async fn run_internal(
     proxy: EventLoopProxy<ClientMessage>,
     receiver: async_std::channel::Receiver<ServerMessage>,
 ) -> miette::Result<()> {
-    // let (stream, _) = connect_async("127.0.0.1:9001").await.into_diagnostic()?;
-
     let listener = TcpListener::bind("127.0.0.1:9001")
         .await
         .into_diagnostic()?;
@@ -132,7 +130,7 @@ async fn run_internal(
         .await;
     }
 
-    loop {}
+    Ok(())
 }
 
 impl ApplicationHandler<ClientMessage> for SurrogateRunner {

@@ -23,26 +23,26 @@ struct MyView {
 
 impl View for MyView {
     fn build(&self) -> impl Element {
-        "Some beautiful text"
-        // hstack((BufferElement::new(|| {
-        //     let content = std::fs::read_to_string("src/main.rs").unwrap();
-        //     let simple = SimpleBuffer::new("src/main.rs".into(), &content);
+        // "Some beautiful text"
+        hstack((BufferElement::new(|| {
+            let content = std::fs::read_to_string("src/main.rs").unwrap();
+            let simple = SimpleBuffer::new("src/main.rs".into(), &content);
 
-        //     #[derive(Clone)]
-        //     struct Fake;
+            #[derive(Clone)]
+            struct Fake;
 
-        //     impl LspResponseTransmitter for Fake {
-        //         type Error = io::Error;
+            impl LspResponseTransmitter for Fake {
+                type Error = io::Error;
 
-        //         fn send(&self, event: paladinc::lsp::LspResponse) -> Result<(), Self::Error> {
-        //             // dbg!(event);
+                fn send(&self, event: paladinc::lsp::LspResponse) -> Result<(), Self::Error> {
+                    // dbg!(event);
 
-        //             Ok(())
-        //         }
-        //     }
+                    Ok(())
+                }
+            }
 
-        //     paladinc::Buffer::create(simple, ".".into(), Fake).unwrap()
-        // }),))
+            paladinc::Buffer::create(simple, ".".into(), Fake).unwrap()
+        }),))
     }
 }
 
