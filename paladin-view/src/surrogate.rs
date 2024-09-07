@@ -163,6 +163,7 @@ impl ApplicationHandler<ClientMessage> for SurrogateRunner {
 
         match event {
             WindowEvent::RedrawRequested => {
+                dbg!(window.inner_size());
                 sender
                     .send_blocking(ServerMessage::AppEvent(AppEvent::Paint(
                         window.inner_size(),

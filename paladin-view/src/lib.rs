@@ -28,10 +28,8 @@ pub mod taffy {
     pub use taffy::*;
 }
 
-use imgref::ImgVec;
-use miette::IntoDiagnostic;
-use rgb::{RGB8, RGBA8};
-use serde::{de::IntoDeserializer, Deserialize, Serialize};
+use rgb::RGBA8;
+use serde::{Deserialize, Serialize};
 use taffy::NodeId;
 pub use utils::*;
 
@@ -50,72 +48,72 @@ pub type Size = taffy::Size<u32>;
 pub type Rect = taffy::Rect<u32>;
 pub struct Color(femtovg::Color);
 
-use async_tungstenite::tungstenite;
 use winit::dpi::PhysicalSize;
 
 /// Run the app.
 /// Call this once with your top level view.
 pub fn run<V: View>(v: V) -> crate::Result<()> {
-    let (mut socket, _response) =
-        tungstenite::connect("ws://localhost:9001/socket").into_diagnostic()?;
+    // let (mut socket, _response) =
+    //     tungstenite::connect("ws://localhost:9001/socket").into_diagnostic()?;
 
     let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
 
     let mut app = App::new(v, PhysicalSize::new(300, 400));
     let cache = text::init_cache();
 
-    let mut canvas = Canvas {
+    let mut canvas = CanvasWrapper {
         inner: canvas,
         text_cache: cache,
     };
 
-    loop {
-        let tungstenite::Message::Binary(binary) = socket.read().unwrap() else {
-            panic!();
-        };
+    // loop {
+    //     let tungstenite::Message::Binary(binary) = socket.read().unwrap() else {
+    //         panic!();
+    //     };
 
-        let SurrogateMessage::FromServer(message) =
-            bincode::deserialize::<SurrogateMessage>(&binary).unwrap()
-        else {
-            panic!()
-        };
+    //     let SurrogateMessage::FromServer(message) =
+    //         bincode::deserialize::<SurrogateMessage>(&binary).unwrap()
+    //     else {
+    //         panic!()
+    //     };
 
-        match message {
-            ServerMessage::Init(_) => {
-                dbg!("idk");
-            }
-            ServerMessage::AppEvent(it) => {
-                let is_paint = matches!(it, AppEvent::Paint(_));
-                app.event(it, &mut canvas);
+    //     match message {
+    //         ServerMessage::Init(_) => {
+    //             dbg!("idk");
+    //         }
+    //         ServerMessage::AppEvent(it) => {
+    //             let is_paint = matches!(it, AppEvent::Paint(_));
+    //             app.event(it, &mut canvas);
 
-                canvas.flush();
+    //             canvas.flush();
 
-                if is_paint {
-                    let sc = canvas.screenshot().unwrap();
+    //             if is_paint {
+    //                 let sc = canvas.screenshot().unwrap();
 
-                    let width = sc.width();
-                    let height = sc.height();
-                    let stride = sc.stride();
+    //                 let width = sc.width();
+    //                 let height = sc.height();
+    //                 dbg!(width, height);
+    //                 let stride = sc.stride();
 
-                    let frame = Frame {
-                        data: sc.into_buf(),
-                        width,
-                        height,
-                        stride,
-                    };
+    //                 let frame = Frame {
+    //                     data: sc.into_buf(),
+    //                     width,
+    //                     height,
+    //                     stride,
+    //                 };
 
-                    socket
-                        .send(tungstenite::Message::Binary(
-                            bincode::serialize(&SurrogateMessage::FromClient(
-                                ClientMessage::Frame(frame),
-                            ))
-                            .unwrap(),
-                        ))
-                        .unwrap();
-                }
-            }
-        }
-    }
+    //                 socket
+    //                     .send(tungstenite::Message::Binary(
+    //                         bincode::serialize(&SurrogateMessage::FromClient(
+    //                             ClientMessage::Frame(frame),
+    //                         ))
+    //                         .unwrap(),
+    //                     ))
+    //                     .unwrap();
+    //             }
+    //         }
+    //     }
+    // }
 
     Runner {
         app,
@@ -309,29 +307,23 @@ pub trait DynView: Reflect {
     fn dyn_cmp(&self, child_id: NodeId, tree: &mut app::ElementTree, registry: &mut TypeRegistry);
 }
 
-/// A painting context. Mostly a wrapper around [femtovg::Canvas].
-pub struct Canvas {
-    pub inner: femtovg::Canvas<OpenGl>,
-    pub text_cache: text::RenderCache,
+pub trait Canvas {
+    fn font_system(&mut self) -> &mut FontSystem;
+    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: crate::Color);
 }
 
-impl Canvas {
-    pub fn font_system(&mut self) -> &mut FontSystem {
+struct CanvasWrapper {
+    pub(crate) inner: femtovg::Canvas<OpenGl>,
+    pub(crate) text_cache: text::RenderCache,
+}
+
+impl Canvas for CanvasWrapper {
+    fn font_system(&mut self) -> &mut FontSystem {
         &mut self.text_cache.font_system
     }
-}
 
-impl Deref for Canvas {
-    type Target = femtovg::Canvas<OpenGl>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for Canvas {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
+    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: crate::Color) {
+        self.inner.clear_rect(x, y, width, height, color.into())
     }
 }
 

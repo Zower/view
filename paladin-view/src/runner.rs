@@ -11,12 +11,12 @@ use winit::{
 
 use crate::{
     app::{App, AppEvent},
-    Canvas, GlobalEvent, Point,
+    Canvas, CanvasWrapper, GlobalEvent, Point,
 };
 
 pub(crate) struct Runner {
     pub(crate) app: App,
-    pub(crate) canvas: Canvas,
+    pub(crate) canvas: CanvasWrapper,
     pub(crate) windows: Windows,
     pub(crate) gl_context: glutin::context::PossiblyCurrentContext,
 }
@@ -69,8 +69,7 @@ impl ApplicationHandler<GlobalEvent> for Runner {
                 gl_context
                     .make_current(&surface)
                     .expect("Making current to work");
-
-                canvas.clear_rect(
+                canvas.inner.clear_rect(
                     0,
                     0,
                     window.inner_size().width,
@@ -80,7 +79,7 @@ impl ApplicationHandler<GlobalEvent> for Runner {
 
                 app.event(AppEvent::Paint(window.inner_size()), canvas);
 
-                canvas.flush();
+                canvas.inner.flush();
 
                 surface
                     .swap_buffers(&gl_context)
@@ -121,7 +120,9 @@ impl ApplicationHandler<GlobalEvent> for Runner {
             }
             WindowEvent::Resized(size) => {
                 app.event(AppEvent::Resize(size), canvas);
-                canvas.set_size(size.width, size.height, window.scale_factor() as f32);
+                canvas
+                    .inner
+                    .set_size(size.width, size.height, window.scale_factor() as f32);
                 window.request_redraw();
             }
             _ => {}

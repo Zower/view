@@ -1,5 +1,5 @@
-use bevy_reflect::Reflect;
 pub use button::*;
+use cosmic_text::FontSystem;
 pub use stack::HStack;
 pub use stack::*;
 use std::{
@@ -25,13 +25,18 @@ pub enum MountedWidget {
 
 pub struct CustomWidget(pub Box<dyn AnyWidget>);
 
-pub trait AnyWidget: Any + Widget {
+pub trait AnyWidget: Any {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
+    fn render(&self, layout: crate::Layout, canvas: &mut dyn Canvas);
 }
 
 impl<T: Any + Widget> AnyWidget for T {
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
+    }
+
+    fn render(&self, layout: crate::Layout, canvas: &mut dyn Canvas) {
+        self.render(layout, canvas)
     }
 }
 
@@ -44,8 +49,8 @@ impl Widget for CustomWidget {
         self.0.style()
     }
 
-    fn layout(&mut self, layout: Layout, canvas: &mut Canvas) {
-        self.0.layout(layout, canvas)
+    fn layout(&mut self, layout: Layout, font_system: &mut FontSystem) {
+        self.0.layout(layout, font_system)
     }
 
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {
@@ -88,7 +93,6 @@ pub trait Widget {
     /// A function where a [Widget] can perform layout calculations within its given bounds. This is most useful to layout text paragraphs before rendering.
     /// Most widgets only paint based on some immutable data and do not need to implement this function.
     ///
-    /// Do not use the canvas for rendering inside the layout function.
     /// ```
     /// # use paladin_view::prelude::*;
     ///
@@ -109,7 +113,7 @@ pub trait Widget {
     /// }
     ///
     /// ```
-    fn layout(&mut self, layout: Layout, canvas: &mut Canvas) {}
+    fn layout(&mut self, layout: Layout, font_system: &mut cosmic_text::FontSystem) {}
 
     /// Painting.
     /// ```
@@ -120,7 +124,7 @@ pub trait Widget {
     /// // Imagine we are inserted into the tree..
     ///
     /// impl Widget for FixedRect {
-    ///     fn render(&self, layout: Layout, canvas: &mut Canvas) {
+    ///     fn render(&self, layout: Layout, canvas: &mut impl Canvas) {
     ///         canvas.clear_rect(
     ///             layout.location.x,
     ///             layout.location.y,
@@ -133,7 +137,7 @@ pub trait Widget {
     ///
     /// ```
     #[allow(unused_variables)]
-    fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
+    fn render(&self, layout: crate::Layout, canvas: &mut impl Canvas) {}
 }
 
 /// A [View] that has been mounted into the tree as a [MountedWidget::View].
@@ -251,7 +255,7 @@ mod button {
             };
         }
 
-        fn render(&self, layout: Layout, canvas: &mut crate::Canvas) {
+        fn render(&self, layout: Layout, canvas: &mut impl crate::Canvas) {
             canvas.clear_rect(
                 layout.location.x,
                 layout.location.y,
@@ -264,8 +268,8 @@ mod button {
 }
 
 mod text {
-    use bon::{bon, builder};
-    use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, LineEnding, Metrics};
+    use bon::bon;
+    use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, FontSystem, LineEnding, Metrics};
 
     use crate::{Element, InsertContext, RebuildContext};
 
@@ -375,12 +379,12 @@ mod text {
     }
 
     impl Widget for Text {
-        fn layout(&mut self, layout: crate::Layout, canvas: &mut crate::Canvas) {
+        fn layout(&mut self, layout: crate::Layout, font_system: &mut FontSystem) {
             if self.wrap != self.buffer.wrap() {
-                self.buffer.set_wrap(canvas.font_system(), self.wrap);
+                self.buffer.set_wrap(font_system, self.wrap);
             }
 
-            let mut buffer = self.buffer.borrow_with(canvas.font_system());
+            let mut buffer = self.buffer.borrow_with(font_system);
 
             buffer.set_size(
                 Some(layout.size.width as f32),
@@ -407,7 +411,7 @@ mod text {
             // }
         }
 
-        fn render(&self, layout: crate::Layout, canvas: &mut crate::Canvas) {
+        fn render(&self, layout: crate::Layout, canvas: &mut impl crate::Canvas) {
             let text_draw_cmds = canvas
                 .text_cache
                 .fill_buffer_to_draw_commands(
