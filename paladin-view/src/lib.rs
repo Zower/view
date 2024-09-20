@@ -307,9 +307,25 @@ pub trait DynView: Reflect {
     fn dyn_cmp(&self, child_id: NodeId, tree: &mut app::ElementTree, registry: &mut TypeRegistry);
 }
 
-pub trait Canvas {
+#[cfg(debug_assertions)]
+pub type Canvas = FakePainter;
+
+pub struct FakePainter;
+
+impl Painter for FakePainter {
+    fn font_system(&mut self) -> &mut FontSystem {
+        todo!()
+    }
+
+    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: crate::Color) {
+        todo!()
+    }
+}
+
+pub trait Painter {
     fn font_system(&mut self) -> &mut FontSystem;
     fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: crate::Color);
+    fn paint_buffer(&mut self);
 }
 
 struct CanvasWrapper {
@@ -317,7 +333,7 @@ struct CanvasWrapper {
     pub(crate) text_cache: text::RenderCache,
 }
 
-impl Canvas for CanvasWrapper {
+impl Painter for CanvasWrapper {
     fn font_system(&mut self) -> &mut FontSystem {
         &mut self.text_cache.font_system
     }

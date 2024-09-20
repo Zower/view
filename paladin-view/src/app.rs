@@ -43,7 +43,7 @@ impl App {
 }
 
 impl App {
-    pub(crate) fn event(&mut self, event: AppEvent, canvas: &mut impl Canvas) {
+    pub(crate) fn event(&mut self, event: AppEvent, canvas: &mut Canvas) {
         match event {
             AppEvent::Clicked(x, y) => {
                 for (_, node) in iter_elements_from(&self.tree.taffy, self.tree.root) {
@@ -128,7 +128,7 @@ impl App {
         self.hint_dirty(self.tree.root);
     }
 
-    fn paint(&mut self, size: winit::dpi::PhysicalSize<u32>, canvas: &mut impl Canvas) {
+    fn paint(&mut self, size: winit::dpi::PhysicalSize<u32>, canvas: &mut Canvas) {
         self.tree
             .taffy
             .compute_layout(

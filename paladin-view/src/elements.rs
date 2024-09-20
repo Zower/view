@@ -27,7 +27,7 @@ pub struct CustomWidget(pub Box<dyn AnyWidget>);
 
 pub trait AnyWidget: Any {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
-    fn render(&self, layout: crate::Layout, canvas: &mut dyn Canvas);
+    fn render(&self, layout: crate::Layout, canvas: &mut Canvas);
 }
 
 impl<T: Any + Widget> AnyWidget for T {
@@ -35,7 +35,7 @@ impl<T: Any + Widget> AnyWidget for T {
         self
     }
 
-    fn render(&self, layout: crate::Layout, canvas: &mut dyn Canvas) {
+    fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {
         self.render(layout, canvas)
     }
 }
@@ -137,7 +137,7 @@ pub trait Widget {
     ///
     /// ```
     #[allow(unused_variables)]
-    fn render(&self, layout: crate::Layout, canvas: &mut impl Canvas) {}
+    fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
 }
 
 /// A [View] that has been mounted into the tree as a [MountedWidget::View].
@@ -255,7 +255,7 @@ mod button {
             };
         }
 
-        fn render(&self, layout: Layout, canvas: &mut impl crate::Canvas) {
+        fn render(&self, layout: Layout, canvas: &mut crate::Canvas) {
             canvas.clear_rect(
                 layout.location.x,
                 layout.location.y,
@@ -411,7 +411,7 @@ mod text {
             // }
         }
 
-        fn render(&self, layout: crate::Layout, canvas: &mut impl crate::Canvas) {
+        fn render(&self, layout: crate::Layout, canvas: &mut crate::Canvas) {
             let text_draw_cmds = canvas
                 .text_cache
                 .fill_buffer_to_draw_commands(
