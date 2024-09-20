@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use components::root::Root;
 
+use cosmic_text::FontSystem;
 use miette::IntoDiagnostic;
 use paladin_view::{prelude::*, CustomWidget};
 use paladinc::ts::highlight;
@@ -29,8 +30,8 @@ impl<F: Fn() -> paladinc::Buffer + 'static> BufferElement<F> {
 }
 
 impl Widget for BufferWidget {
-    fn layout(&mut self, layout: Layout, canvas: &mut Canvas) {
-        self.text.layout(layout, canvas);
+    fn layout(&mut self, layout: Layout, font_system: &mut FontSystem) {
+        self.text.layout(layout, font_system);
     }
     fn render(&self, layout: Layout, canvas: &mut Canvas) {
         self.text.render(layout, canvas)

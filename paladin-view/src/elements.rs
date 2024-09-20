@@ -28,6 +28,9 @@ pub struct CustomWidget(pub Box<dyn AnyWidget>);
 pub trait AnyWidget: Any {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas);
+    fn event(&mut self, event: ElementEvent);
+    fn layout(&mut self, layout: Layout, font_system: &mut FontSystem);
+    fn style(&self) -> Style;
 }
 
 impl<T: Any + Widget> AnyWidget for T {
@@ -37,6 +40,18 @@ impl<T: Any + Widget> AnyWidget for T {
 
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {
         self.render(layout, canvas)
+    }
+
+    fn event(&mut self, event: ElementEvent) {
+        self.event(event);
+    }
+
+    fn layout(&mut self, layout: Layout, font_system: &mut FontSystem) {
+        self.layout(layout, font_system);
+    }
+
+    fn style(&self) -> Style {
+        self.style()
     }
 }
 
@@ -53,7 +68,7 @@ impl Widget for CustomWidget {
         self.0.layout(layout, font_system)
     }
 
-    fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {
+    fn render(&self, layout: Layout, canvas: &mut Canvas) {
         self.0.render(layout, canvas)
     }
 }
@@ -422,7 +437,7 @@ mod text {
                 .unwrap();
 
             for (color, cmds) in text_draw_cmds {
-                canvas.draw_glyph_commands(
+                canvas.inner.draw_glyph_commands(
                     cmds,
                     &femtovg::Paint::color(femtovg::Color::rgb(color.r(), color.g(), color.b())),
                     1.,

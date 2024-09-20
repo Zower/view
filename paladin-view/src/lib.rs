@@ -28,6 +28,7 @@ pub mod taffy {
     pub use taffy::*;
 }
 
+use miette::IntoDiagnostic;
 use rgb::RGBA8;
 use serde::{Deserialize, Serialize};
 use taffy::NodeId;
@@ -53,67 +54,46 @@ use winit::dpi::PhysicalSize;
 /// Run the app.
 /// Call this once with your top level view.
 pub fn run<V: View>(v: V) -> crate::Result<()> {
-    // let (mut socket, _response) =
-    //     tungstenite::connect("ws://localhost:9001/socket").into_diagnostic()?;
-
     let (canvas, el, pcc, surface, window, _config) = start::create_event_loop(800, 600, "view");
 
-    let mut app = App::new(v, PhysicalSize::new(300, 400));
-    let cache = text::init_cache();
-
-    let mut canvas = CanvasWrapper {
+    let canvas = Canvas {
         inner: canvas,
-        text_cache: cache,
+        text_cache: text::init_cache(),
     };
 
-    // loop {
-    //     let tungstenite::Message::Binary(binary) = socket.read().unwrap() else {
-    //         panic!();
-    //     };
+    let initial_state;
+    #[cfg(debug_assertions)]
+    {
+        let (mut socket, _response) =
+            tungstenite::connect("ws://localhost:9001/socket").into_diagnostic()?;
 
-    //     let SurrogateMessage::FromServer(message) =
-    //         bincode::deserialize::<SurrogateMessage>(&binary).unwrap()
-    //     else {
-    //         panic!()
-    //     };
+        socket
+            .write(tungstenite::Message::Binary(
+                bincode::serialize(&ClientMessage::RequestState).into_diagnostic()?,
+            ))
+            .into_diagnostic()?;
 
-    //     match message {
-    //         ServerMessage::Init(_) => {
-    //             dbg!("idk");
-    //         }
-    //         ServerMessage::AppEvent(it) => {
-    //             let is_paint = matches!(it, AppEvent::Paint(_));
-    //             app.event(it, &mut canvas);
+        socket.flush().into_diagnostic()?;
 
-    //             canvas.flush();
+        let tungstenite::Message::Binary(binary) = socket.read().into_diagnostic()? else {
+            panic!();
+        };
 
-    //             if is_paint {
-    //                 let sc = canvas.screenshot().unwrap();
+        let message = bincode::deserialize::<ServerMessage>(&binary).into_diagnostic()?;
 
-    //                 let width = sc.width();
-    //                 let height = sc.height();
-    //                 dbg!(width, height);
-    //                 let stride = sc.stride();
+        initial_state = match message {
+            ServerMessage::State(state) => state,
+            ServerMessage::NoState => String::new(),
+        }
+    };
+    #[cfg(not(debug_assertions))]
+    {
+        initial_state = String::new()
+    }
 
-    //                 let frame = Frame {
-    //                     data: sc.into_buf(),
-    //                     width,
-    //                     height,
-    //                     stride,
-    //                 };
+    dbg!(initial_state);
 
-    //                 socket
-    //                     .send(tungstenite::Message::Binary(
-    //                         bincode::serialize(&SurrogateMessage::FromClient(
-    //                             ClientMessage::Frame(frame),
-    //                         ))
-    //                         .unwrap(),
-    //                     ))
-    //                     .unwrap();
-    //             }
-    //         }
-    //     }
-    // }
+    let app = App::new(v, PhysicalSize::new(300, 400));
 
     Runner {
         app,
@@ -197,15 +177,9 @@ impl<T: View + 'static> Element for T {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum SurrogateMessage {
-    FromClient(ClientMessage),
-    FromServer(ServerMessage),
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub(crate) enum ClientMessage {
-    Update(String),
-    Frame(Frame),
+    SetState(String),
+    RequestState,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -218,8 +192,8 @@ pub(crate) struct Frame {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) enum ServerMessage {
-    Init(String),
-    AppEvent(AppEvent),
+    State(String),
+    NoState,
 }
 
 /// Mostly a hack around functions being monomorphized at the call-site.
@@ -307,33 +281,12 @@ pub trait DynView: Reflect {
     fn dyn_cmp(&self, child_id: NodeId, tree: &mut app::ElementTree, registry: &mut TypeRegistry);
 }
 
-#[cfg(debug_assertions)]
-pub type Canvas = FakePainter;
-
-pub struct FakePainter;
-
-impl Painter for FakePainter {
-    fn font_system(&mut self) -> &mut FontSystem {
-        todo!()
-    }
-
-    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: crate::Color) {
-        todo!()
-    }
-}
-
-pub trait Painter {
-    fn font_system(&mut self) -> &mut FontSystem;
-    fn clear_rect(&mut self, x: u32, y: u32, width: u32, height: u32, color: crate::Color);
-    fn paint_buffer(&mut self);
-}
-
-struct CanvasWrapper {
+pub struct Canvas {
     pub(crate) inner: femtovg::Canvas<OpenGl>,
     pub(crate) text_cache: text::RenderCache,
 }
 
-impl Painter for CanvasWrapper {
+impl Canvas {
     fn font_system(&mut self) -> &mut FontSystem {
         &mut self.text_cache.font_system
     }

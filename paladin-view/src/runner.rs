@@ -11,12 +11,12 @@ use winit::{
 
 use crate::{
     app::{App, AppEvent},
-    Canvas, CanvasWrapper, GlobalEvent, Point,
+    Canvas, GlobalEvent, Point,
 };
 
 pub(crate) struct Runner {
     pub(crate) app: App,
-    pub(crate) canvas: CanvasWrapper,
+    pub(crate) canvas: Canvas,
     pub(crate) windows: Windows,
     pub(crate) gl_context: glutin::context::PossiblyCurrentContext,
 }
