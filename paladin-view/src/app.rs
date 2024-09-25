@@ -9,8 +9,8 @@ use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-    Canvas, CompareResult, Element, InsertContext, Layout, MountedWidget, Point, RebuildContext,
-    ReflectStateTrait, View, ViewWidget, Widget,
+    Canvas, CompareResult, Element, InsertContext, KeyEvent, Layout, MountedWidget, Point,
+    RebuildContext, ReflectStateTrait, View, ViewWidget, Widget,
 };
 
 pub(crate) struct App {
@@ -19,11 +19,12 @@ pub(crate) struct App {
 }
 
 // Global events passed through from the event loop abstraction.
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug)]
 #[doc(hidden)]
 pub(crate) enum AppEvent {
     Resize(PhysicalSize<u32>),
     Clicked(u32, u32),
+    Key(KeyEvent),
     Paint(PhysicalSize<u32>),
 }
 
@@ -79,6 +80,17 @@ impl App {
                     .expect("Root doesn't exist")
             }
             AppEvent::Paint(size) => self.paint(size, canvas),
+            AppEvent::Key(key_event) => {
+                for (_, node) in iter_elements_from(&self.tree.taffy, self.tree.root) {
+                    let el = self.tree.elements.get_mut(&node).unwrap();
+                    let layout: Layout = self.tree.taffy.layout(node).unwrap().clone().into();
+                    let MountedWidget::Button(_) = el else {
+                        continue;
+                    };
+
+                    el.event(crate::ElementEvent::Key(key_event.clone()));
+                }
+            }
         }
 
         self.dirty()

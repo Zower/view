@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crop::{Rope, RopeSlice};
+use miette::IntoDiagnostic;
 
 use super::{Cursor, CursorWithCharacter, Edit};
 
@@ -12,14 +13,15 @@ pub struct SimpleBuffer {
 }
 
 impl SimpleBuffer {
-    pub fn new(path: PathBuf, str: &str) -> Self {
+    pub fn open(path: PathBuf) -> crate::Result<Self> {
+        let str = std::fs::read_to_string(&path).into_diagnostic()?;
         let rope = Rope::from(str);
 
-        Self {
+        Ok(Self {
             rope,
             cursor: Cursor::new(),
             path,
-        }
+        })
     }
 
     pub fn text(&self) -> String {

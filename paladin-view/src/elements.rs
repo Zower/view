@@ -10,7 +10,9 @@ use std::{
 use taffy::{prelude::auto, NodeId};
 pub use text::*;
 
-use crate::{Canvas, CompareResult, Element, InsertContext, Layout, RebuildContext, View};
+use crate::{
+    Canvas, CompareResult, Element, InsertContext, KeyEvent, Layout, RebuildContext, View,
+};
 
 /// An element that has been mounted into the tree.
 #[derive(Debug)]
@@ -187,6 +189,7 @@ impl Default for Style {
 /// Any interaction with an element.
 pub enum ElementEvent {
     Click(u32, u32),
+    Key(KeyEvent),
 }
 
 mod button {
@@ -257,16 +260,10 @@ mod button {
         }
     }
 
-    impl PartialEq for Button {
-        fn eq(&self, _other: &Self) -> bool {
-            false
-        }
-    }
-
     impl Widget for Button {
         fn event(&mut self, event: ElementEvent) {
-            match event {
-                ElementEvent::Click(_, _) => self.on_click.trigger(),
+            if let ElementEvent::Click(_, _) = event {
+                self.on_click.trigger()
             };
         }
 

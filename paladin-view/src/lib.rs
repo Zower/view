@@ -15,9 +15,6 @@ mod runner;
 mod start;
 mod text;
 
-#[doc(hidden)]
-pub mod surrogate;
-
 mod utils;
 
 pub mod reflect {
@@ -28,7 +25,6 @@ pub mod taffy {
     pub use taffy::*;
 }
 
-use miette::IntoDiagnostic;
 use rgb::RGBA8;
 use serde::{Deserialize, Serialize};
 use taffy::NodeId;
@@ -49,6 +45,8 @@ pub type Size = taffy::Size<u32>;
 pub type Rect = taffy::Rect<u32>;
 pub struct Color(femtovg::Color);
 
+pub type KeyEvent = winit::event::KeyEvent;
+
 use winit::dpi::PhysicalSize;
 
 /// Run the app.
@@ -60,38 +58,6 @@ pub fn run<V: View>(v: V) -> crate::Result<()> {
         inner: canvas,
         text_cache: text::init_cache(),
     };
-
-    let initial_state;
-    #[cfg(debug_assertions)]
-    {
-        let (mut socket, _response) =
-            tungstenite::connect("ws://localhost:9001/socket").into_diagnostic()?;
-
-        socket
-            .write(tungstenite::Message::Binary(
-                bincode::serialize(&ClientMessage::RequestState).into_diagnostic()?,
-            ))
-            .into_diagnostic()?;
-
-        socket.flush().into_diagnostic()?;
-
-        let tungstenite::Message::Binary(binary) = socket.read().into_diagnostic()? else {
-            panic!();
-        };
-
-        let message = bincode::deserialize::<ServerMessage>(&binary).into_diagnostic()?;
-
-        initial_state = match message {
-            ServerMessage::State(state) => state,
-            ServerMessage::NoState => String::new(),
-        }
-    };
-    #[cfg(not(debug_assertions))]
-    {
-        initial_state = String::new()
-    }
-
-    dbg!(initial_state);
 
     let app = App::new(v, PhysicalSize::new(300, 400));
 

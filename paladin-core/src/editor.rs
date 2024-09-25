@@ -2,6 +2,7 @@ use std::{fmt::Display, path::PathBuf};
 
 use crop::RopeSlice;
 
+use miette::IntoDiagnostic;
 use strum::EnumString;
 use tree_sitter::Tree;
 
@@ -49,6 +50,8 @@ impl Buffer {
         workspace: PathBuf,
         receiver: impl LspResponseTransmitter,
     ) -> crate::Result<Self> {
+        let workspace = workspace.canonicalize().into_diagnostic()?;
+
         let lsp = if buffer
             .path()
             .to_str()

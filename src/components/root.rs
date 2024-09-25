@@ -1,7 +1,4 @@
-use std::io;
-
 use paladin_view::prelude::*;
-use paladinc::{lsp::LspResponseTransmitter, SimpleBuffer};
 
 use crate::BufferElement;
 
@@ -24,25 +21,7 @@ struct MyView {
 impl View for MyView {
     fn build(&self) -> impl Element {
         // "Some beautiful text"
-        hstack((BufferElement::new(|| {
-            let content = std::fs::read_to_string("src/main.rs").unwrap();
-            let simple = SimpleBuffer::new("src/main.rs".into(), &content);
-
-            #[derive(Clone)]
-            struct Fake;
-
-            impl LspResponseTransmitter for Fake {
-                type Error = io::Error;
-
-                fn send(&self, event: paladinc::lsp::LspResponse) -> Result<(), Self::Error> {
-                    // dbg!(event);
-
-                    Ok(())
-                }
-            }
-
-            paladinc::Buffer::create(simple, ".".into(), Fake).unwrap()
-        }),))
+        hstack((BufferElement::new("src/main.rs"),))
     }
 }
 

@@ -1,19 +1,19 @@
-use std::path::PathBuf;
+use std::{io, path::PathBuf};
 
 use components::root::Root;
 
 use cosmic_text::FontSystem;
 use miette::IntoDiagnostic;
 use paladin_view::{prelude::*, CustomWidget};
-use paladinc::ts::highlight;
+use paladinc::{lsp::LspResponseTransmitter, ts::highlight};
 mod components;
 
 fn main() -> paladin_view::Result<()> {
     run(Root)
 }
 
-pub struct BufferElement<F> {
-    create: F,
+pub struct BufferElement {
+    path: String,
 }
 
 struct BufferWidget {
@@ -23,9 +23,28 @@ struct BufferWidget {
     query: tree_sitter::Query,
 }
 
-impl<F: Fn() -> paladinc::Buffer + 'static> BufferElement<F> {
-    pub fn new(f: F) -> impl Element {
-        Self { create: f }
+impl BufferElement {
+    pub fn new(path: impl Into<String>) -> impl Element {
+        Self { path: path.into() }
+    }
+
+    fn create_buffer() -> paladinc::Result<paladinc::Buffer> {
+        let simple = paladinc::SimpleBuffer::open("src/main.rs".into())?;
+
+        #[derive(Clone)]
+        struct Fake;
+
+        impl LspResponseTransmitter for Fake {
+            type Error = io::Error;
+
+            fn send(&self, event: paladinc::lsp::LspResponse) -> Result<(), Self::Error> {
+                // dbg!(event);
+
+                Ok(())
+            }
+        }
+
+        paladinc::Buffer::create(simple, ".".into(), Fake)
     }
 }
 
@@ -33,12 +52,13 @@ impl Widget for BufferWidget {
     fn layout(&mut self, layout: Layout, font_system: &mut FontSystem) {
         self.text.layout(layout, font_system);
     }
+
     fn render(&self, layout: Layout, canvas: &mut Canvas) {
         self.text.render(layout, canvas)
     }
 }
 
-impl<F: Fn() -> paladinc::Buffer + 'static> Element for BufferElement<F> {
+impl Element for BufferElement {
     fn insert(self, context: &mut impl paladin_view::InsertContext) {
         let mut qc = tree_sitter::QueryCursor::new();
         let query = tree_sitter::Query::new(
@@ -47,7 +67,7 @@ impl<F: Fn() -> paladinc::Buffer + 'static> Element for BufferElement<F> {
         )
         .unwrap();
 
-        let buffer = (self.create)();
+        let buffer = Self::create_buffer().unwrap();
 
         let content = get_rich_text_content(&buffer, 0, 149, &mut qc, &query);
 
@@ -77,6 +97,10 @@ impl<F: Fn() -> paladinc::Buffer + 'static> Element for BufferElement<F> {
         let Ok(old) = custom.into_any().downcast::<BufferWidget>() else {
             return paladin_view::CompareResult::Replace { with: self };
         };
+
+        if old.buffer.buffer.path.to_str() != Some(&self.path) {
+            panic!("New path")
+        }
 
         // no need to replace
         context.insert(paladin_view::MountedWidget::Custom(CustomWidget(old)));
