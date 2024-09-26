@@ -4,7 +4,7 @@ use components::root::Root;
 
 use cosmic_text::FontSystem;
 use miette::IntoDiagnostic;
-use paladin_view::{prelude::*, CustomWidget};
+use paladin_view::{prelude::*, CustomWidget, Style, Styleable};
 use paladinc::{lsp::LspResponseTransmitter, ts::highlight};
 mod components;
 
@@ -14,6 +14,7 @@ fn main() -> paladin_view::Result<()> {
 
 pub struct BufferElement {
     path: String,
+    style: Style,
 }
 
 struct BufferWidget {
@@ -21,11 +22,15 @@ struct BufferWidget {
     text: paladin_view::Text,
     qc: tree_sitter::QueryCursor,
     query: tree_sitter::Query,
+    style: Style,
 }
 
 impl BufferElement {
-    pub fn new(path: impl Into<String>) -> impl Element {
-        Self { path: path.into() }
+    pub fn new(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            style: Default::default(),
+        }
     }
 
     fn create_buffer() -> paladinc::Result<paladinc::Buffer> {
@@ -56,6 +61,10 @@ impl Widget for BufferWidget {
     fn render(&self, layout: Layout, canvas: &mut Canvas) {
         self.text.render(layout, canvas)
     }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
 }
 
 impl Element for BufferElement {
@@ -78,6 +87,7 @@ impl Element for BufferElement {
             text,
             qc,
             query,
+            style: self.style,
         };
 
         context.insert(paladin_view::MountedWidget::Custom(CustomWidget(Box::new(
@@ -106,6 +116,12 @@ impl Element for BufferElement {
         context.insert(paladin_view::MountedWidget::Custom(CustomWidget(old)));
 
         return paladin_view::CompareResult::Success;
+    }
+}
+
+impl Styleable for BufferElement {
+    fn style_mut(&mut self) -> &mut Style {
+        &mut self.style
     }
 }
 

@@ -7,7 +7,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
-use taffy::{prelude::auto, NodeId};
+use taffy::{prelude::auto, LengthPercentage, NodeId};
 pub use text::*;
 
 use crate::{
@@ -30,7 +30,7 @@ pub struct CustomWidget(pub Box<dyn AnyWidget>);
 pub trait AnyWidget: Any {
     fn into_any(self: Box<Self>) -> Box<dyn Any>;
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas);
-    fn event(&mut self, event: ElementEvent);
+    fn event(&mut self, event: WidgetEvent);
     fn layout(&mut self, layout: Layout, font_system: &mut FontSystem);
     fn style(&self) -> Style;
 }
@@ -44,7 +44,7 @@ impl<T: Any + Widget> AnyWidget for T {
         self.render(layout, canvas)
     }
 
-    fn event(&mut self, event: ElementEvent) {
+    fn event(&mut self, event: WidgetEvent) {
         self.event(event);
     }
 
@@ -58,7 +58,7 @@ impl<T: Any + Widget> AnyWidget for T {
 }
 
 impl Widget for CustomWidget {
-    fn event(&mut self, event: ElementEvent) {
+    fn event(&mut self, event: WidgetEvent) {
         self.0.event(event)
     }
 
@@ -76,7 +76,7 @@ impl Widget for CustomWidget {
 }
 
 #[enum_delegate::register]
-/// The behavior of an element that is inserted into the tree.
+/// An element (or whatever it has decided to insert) that is inserted into the tree.
 pub trait Widget {
     /// Respond to events that may occur while this Widget is mouunted.
     /// This is where state updates happen.
@@ -99,7 +99,7 @@ pub trait Widget {
     ///
     /// ```
     #[allow(unused_variables)]
-    fn event(&mut self, event: ElementEvent) {}
+    fn event(&mut self, event: WidgetEvent) {}
 
     /// Return the current style of the element. This may be called up to each frame.
     fn style(&self) -> Style {
@@ -187,9 +187,31 @@ impl Default for Style {
 }
 
 /// Any interaction with an element.
-pub enum ElementEvent {
+pub enum WidgetEvent {
     Click(u32, u32),
     Key(KeyEvent),
+}
+
+/// Shorthands for styling.
+pub trait Styleable: Sized {
+    fn style_mut(&mut self) -> &mut Style;
+
+    fn pad(mut self, padding: LengthPercentage) -> Self {
+        self.style_mut().0.padding = taffy::Rect {
+            left: padding,
+            right: padding,
+            top: padding,
+            bottom: padding,
+        };
+
+        self
+    }
+
+    // fn align(mut self, align: ) -> Self {
+    //     self.style_mut().0.ali
+
+    //     self
+    // }
 }
 
 mod button {
@@ -197,13 +219,14 @@ mod button {
 
     use bon::builder;
 
-    use crate::{ButtonMessage, Color, Element, Layout, Reducer, State, Triggerable};
+    use crate::{state::Reducer, state::State, ButtonMessage, Color, Element, Layout, Triggerable};
 
-    use super::{ElementEvent, MountedWidget, Widget};
+    use super::{MountedWidget, Style, Styleable, Widget, WidgetEvent};
 
     #[builder]
     pub struct Button {
         on_click: Triggerable,
+        style: Style,
     }
 
     impl Element for Button {
@@ -243,28 +266,30 @@ mod button {
         /// ```
         ///
         pub fn on_click(on_click: impl Into<Triggerable>) -> Button {
-            Self::builder().on_click(on_click).build()
+            Self::builder()
+                .on_click(on_click)
+                .style(Style::default())
+                .build()
         }
 
         /// Convenience for a state reducer that only responds to button messages.
         pub fn interactions<S: Reducer<ButtonMessage>>(state: &State<ButtonMessage, S>) -> Button {
             Self::builder()
                 .on_click(state.then_send(ButtonMessage::Clicked(0, 0)))
+                .style(Style::default())
                 .build()
         }
     }
 
-    impl Debug for Button {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_tuple("Button").finish()
-        }
-    }
-
     impl Widget for Button {
-        fn event(&mut self, event: ElementEvent) {
-            if let ElementEvent::Click(_, _) = event {
+        fn event(&mut self, event: WidgetEvent) {
+            if let WidgetEvent::Click(_, _) = event {
                 self.on_click.trigger()
             };
+        }
+
+        fn style(&self) -> Style {
+            self.style.clone()
         }
 
         fn render(&self, layout: Layout, canvas: &mut crate::Canvas) {
@@ -277,6 +302,18 @@ mod button {
             );
         }
     }
+
+    impl Styleable for Button {
+        fn style_mut(&mut self) -> &mut Style {
+            &mut self.style
+        }
+    }
+
+    impl Debug for Button {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_tuple("Button").finish()
+        }
+    }
 }
 
 mod text {
@@ -285,7 +322,7 @@ mod text {
 
     use crate::{Element, InsertContext, RebuildContext};
 
-    use super::{MountedWidget, Widget};
+    use super::{MountedWidget, Style, Styleable, Widget};
 
     #[derive(Debug)]
     /// Rich text.
@@ -293,6 +330,7 @@ mod text {
         unused_text: Option<Vec<(String, AttrsList)>>,
         wrap: cosmic_text::Wrap,
         buffer: cosmic_text::Buffer,
+        style: Style,
     }
 
     impl Element for Text {
@@ -306,6 +344,7 @@ mod text {
             context: &mut impl RebuildContext,
         ) -> crate::CompareResult<impl Element> {
             if matches!(old, MountedWidget::Text(_)) {
+                // todo
                 context.insert(MountedWidget::Text(self));
                 crate::CompareResult::<Self>::Success
             } else {
@@ -343,6 +382,7 @@ mod text {
                 unused_text: Some(vec![(text.into(), AttrsList::new(attrs))]),
                 buffer: Buffer::new_empty(Metrics::new(size, size)),
                 wrap: wrap.unwrap_or(cosmic_text::Wrap::Word),
+                style: Style::default(),
             }
         }
 
@@ -352,11 +392,10 @@ mod text {
                 unused_text: Some(text),
                 wrap: cosmic_text::Wrap::Word,
                 buffer: Buffer::new_empty(Metrics::new(size, size)),
+                style: Style::default(),
             }
         }
     }
-
-    impl Text {}
 
     fn text(str: &'static str) -> Text {
         let size = 25.;
@@ -368,6 +407,7 @@ mod text {
             unused_text: Some(vec![(str.into(), AttrsList::new(attrs))]),
             buffer: Buffer::new_empty(Metrics::new(size, size)),
             wrap: cosmic_text::Wrap::Word,
+            style: Style::default(),
         }
     }
 
@@ -440,6 +480,16 @@ mod text {
                     1.,
                 );
             }
+        }
+
+        fn style(&self) -> Style {
+            self.style.clone()
+        }
+    }
+
+    impl Styleable for Text {
+        fn style_mut(&mut self) -> &mut Style {
+            &mut self.style
         }
     }
 }
@@ -523,6 +573,7 @@ pub(crate) mod prelude {
     pub use super::text::Text;
     pub use super::OneOf;
     pub use super::OneOfSwizz;
+    pub use super::Styleable;
 }
 
 /// Allows returning different types from a expression, assuming they both implement [Element].

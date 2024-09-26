@@ -115,10 +115,7 @@ impl ApplicationHandler<GlobalEvent> for Runner {
                 // app.main();
             }
             WindowEvent::KeyboardInput { event, .. } => {
-                app.event(AppEvent::Key(size), canvas);
-                canvas
-                    .inner
-                    .set_size(size.width, size.height, window.scale_factor() as f32);
+                app.event(AppEvent::Key(event), canvas);
                 window.request_redraw();
             }
             WindowEvent::Resized(size) => {

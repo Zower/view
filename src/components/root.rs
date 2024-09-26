@@ -1,4 +1,4 @@
-use paladin_view::prelude::*;
+use paladin_view::{prelude::*, taffy::LengthPercentage};
 
 use crate::BufferElement;
 
@@ -21,7 +21,7 @@ struct MyView {
 impl View for MyView {
     fn build(&self) -> impl Element {
         // "Some beautiful text"
-        hstack((BufferElement::new("src/main.rs"),))
+        hstack((BufferElement::new("src/main.rs").pad(LengthPercentage::Percent(0.5)),))
     }
 }
 

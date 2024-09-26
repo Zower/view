@@ -59,7 +59,7 @@ impl App {
                         && x < layout.location.x + layout.size.width
                         && y < layout.location.y + layout.size.height
                     {
-                        el.event(crate::ElementEvent::Click(x, y));
+                        el.event(crate::WidgetEvent::Click(x, y));
                     }
                 }
             }
@@ -88,7 +88,7 @@ impl App {
                         continue;
                     };
 
-                    el.event(crate::ElementEvent::Key(key_event.clone()));
+                    el.event(crate::WidgetEvent::Key(key_event.clone()));
                 }
             }
         }
