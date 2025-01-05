@@ -4,17 +4,16 @@ use std::{
 };
 
 use bevy_reflect::{Reflect, TypeRegistry};
-use serde::{Deserialize, Serialize};
 use taffy::{prelude::length, NodeId, Size, TaffyTree, TraversePartialTree};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-    Canvas, CompareResult, Element, InsertContext, KeyEvent, Layout, MountedWidget, Point,
-    RebuildContext, ReflectStateTrait, View, ViewWidget, Widget,
+    BuildResult, Canvas, Element, InsertChildren, InsertContext, KeyEvent, Layout, MountedWidget,
+    Point, RebuildChildren, RebuildContext, ReflectStateTrait, View, Widget,
 };
 
 pub(crate) struct App {
-    tree: ElementTree,
+    tree: WidgetTree,
     registry: TypeRegistry,
 }
 
@@ -34,7 +33,7 @@ impl App {
 
         view.register(&mut type_registry);
 
-        let tree = ElementTree::create(&mut type_registry, view, size);
+        let tree = WidgetTree::create(&mut type_registry, view, size);
 
         Self {
             registry: type_registry,
@@ -48,7 +47,7 @@ impl App {
         match event {
             AppEvent::Clicked(x, y) => {
                 for (_, node) in iter_elements_from(&self.tree.taffy, self.tree.root) {
-                    let el = self.tree.elements.get_mut(&node).unwrap();
+                    let el = self.tree.widgets.get_mut(&node).unwrap();
                     let layout: Layout = self.tree.taffy.layout(node).unwrap().clone().into();
                     let MountedWidget::Button(_) = el else {
                         continue;
@@ -82,7 +81,7 @@ impl App {
             AppEvent::Paint(size) => self.paint(size, canvas),
             AppEvent::Key(key_event) => {
                 for (_, node) in iter_elements_from(&self.tree.taffy, self.tree.root) {
-                    let el = self.tree.elements.get_mut(&node).unwrap();
+                    let el = self.tree.widgets.get_mut(&node).unwrap();
                     let layout: Layout = self.tree.taffy.layout(node).unwrap().clone().into();
                     let MountedWidget::Button(_) = el else {
                         continue;
@@ -103,8 +102,7 @@ impl App {
         let from = self.tree.taffy.parent(hint).unwrap_or(hint);
 
         for (_, node) in iter_elements_from(&self.tree.taffy, from) {
-            let MountedWidget::View(ViewWidget(view)) = self.tree.elements.get_mut(&node).unwrap()
-            else {
+            let Some(MountedView(view)) = self.tree.views.get_mut(&node) else {
                 continue;
             };
 
@@ -168,7 +166,7 @@ impl App {
 
             let layout: Layout = self.tree.taffy.layout(node).unwrap().clone().into();
 
-            let v = self.tree.elements.get_mut(&node).unwrap();
+            let v = self.tree.widgets.get_mut(&node).unwrap();
 
             v.layout(layout.plus_location(acc_point), canvas.font_system());
             v.render(layout.plus_location(acc_point), canvas);
@@ -257,16 +255,19 @@ pub(crate) fn iter_fields(of: &mut dyn Reflect, mut f: impl FnMut(usize, &mut dy
     }
 }
 
+struct MountedView(Box<dyn View>);
+
 // Should only be used by DynView
 #[doc(hidden)]
-pub struct ElementTree {
+pub struct WidgetTree {
     // Also holds parent, child information
     taffy: TaffyTree,
-    elements: HashMap<NodeId, MountedWidget>,
+    widgets: HashMap<NodeId, MountedWidget>,
+    views: HashMap<NodeId, MountedView>,
     root: NodeId,
 }
 
-impl ElementTree {
+impl WidgetTree {
     pub(crate) fn create<V: View>(
         registry: &mut TypeRegistry,
         root_item: V,
@@ -281,8 +282,6 @@ impl ElementTree {
         size: PhysicalSize<u32>,
     ) -> Self {
         let mut taffy = TaffyTree::default();
-        let elements = HashMap::default();
-
         let root = taffy
             .new_leaf(taffy::Style {
                 size: taffy::Size {
@@ -296,7 +295,8 @@ impl ElementTree {
 
         let mut this = Self {
             taffy,
-            elements,
+            widgets: HashMap::default(),
+            views: HashMap::default(),
             root,
         };
 
@@ -305,11 +305,11 @@ impl ElementTree {
         this
     }
 
-    pub(crate) fn insert(&mut self, element: MountedWidget, parent: NodeId) -> NodeId {
-        let id = self.taffy.new_leaf(element.style().0).unwrap();
+    pub(crate) fn insert(&mut self, widget: MountedWidget, parent: NodeId) -> NodeId {
+        let id = self.taffy.new_leaf(widget.style().0).unwrap();
         self.taffy.add_child(parent, id).unwrap();
 
-        self.elements.insert(id, element);
+        self.widgets.insert(id, widget);
 
         id
     }
@@ -323,7 +323,7 @@ impl ElementTree {
         let id = self.taffy.new_leaf(element.style().0).unwrap();
 
         self.taffy.insert_child_at_index(parent, idx, id).unwrap();
-        self.elements.insert(id, element);
+        self.widgets.insert(id, element);
 
         id
     }
@@ -336,33 +336,33 @@ impl ElementTree {
         debug_assert!(self.taffy.child_count(view_id) == 1);
         let only_child = self.taffy.child_at_index(view_id, 0).unwrap();
 
-        let Some(MountedWidget::View(ViewWidget(view))) = self.elements.remove(&view_id) else {
-            panic!()
+        let Some(view) = self.views.remove(&view_id) else {
+            unreachable!()
         };
 
-        view.dyn_cmp(only_child, self, registry);
+        view.0.dyn_cmp(only_child, self, registry);
 
         // todo avoid this by passing in tree?
-        self.elements.insert(view_id, ViewWidget(view).into());
+        self.views.insert(view_id, view);
     }
 }
 
 #[doc(hidden)]
 pub fn iter_elements_cmp<E: Element>(
-    tree: &mut ElementTree,
+    tree: &mut WidgetTree,
     processing: NodeId,
     new_element_at_position: E,
     registry: &mut TypeRegistry,
 ) {
     struct CompareInsertContext<'a> {
-        tree: &'a mut ElementTree,
+        tree: &'a mut WidgetTree,
         processing: NodeId,
         registry: &'a mut TypeRegistry,
         child_idx: usize,
     }
 
     impl<'a> RebuildContext for CompareInsertContext<'a> {
-        fn child_work<E: Element>(&mut self, e: E) {
+        fn rebuild_child<E: Element>(&mut self, e: E) {
             iter_elements_cmp(
                 self.tree,
                 self.tree
@@ -375,93 +375,87 @@ pub fn iter_elements_cmp<E: Element>(
 
             self.child_idx += 1;
         }
-
-        fn insert(&mut self, el: MountedWidget) -> NodeId {
-            self.tree.elements.insert(self.processing, el);
-
-            self.processing
-        }
-
-        fn registry(&mut self) -> &mut TypeRegistry {
-            &mut self.registry
-        }
     }
 
-    let element_at_current_position = tree.elements.remove(&processing).unwrap();
+    let element_at_current_position = tree.widgets.remove(&processing).unwrap();
 
-    if let CompareResult::Replace { with } = new_element_at_position.compare_rebuild(
-        element_at_current_position,
-        &mut CompareInsertContext {
+    let BuildResult { widget, children } =
+        new_element_at_position.compare_rebuild(element_at_current_position);
+
+    tree.widgets.insert(processing, widget);
+
+    if let Some(children) = children {
+        let rebuilder = &mut CompareInsertContext {
             tree,
             processing,
             registry,
             child_idx: 0,
-        },
-    ) {
-        let ElementTree {
-            taffy, elements, ..
-        } = tree;
+        };
 
-        let parent = taffy.parent(processing).unwrap();
-        let to_delete = iter_elements_from(&taffy, processing)
-            .map(|it| it.1)
-            .collect::<Vec<_>>();
-
-        for to_delete in to_delete {
-            elements.remove(&to_delete).unwrap();
-            taffy.remove(to_delete).unwrap();
-        }
-
-        let mut idx = 0;
-
-        while let false = taffy.child_at_index(parent, idx).unwrap() == processing {
-            idx += 1;
-        }
-
-        taffy.remove(processing).unwrap();
-
-        mount_children(registry, tree, parent, with, Some(idx));
+        children.rebuild_children(rebuilder)
     }
+
+    // self.processing
+
+    // let ElementTree {
+    //     taffy, elements, ..
+    // } = tree;
+
+    // let parent = taffy.parent(processing).unwrap();
+    // let to_delete = iter_elements_from(&taffy, processing)
+    //     .map(|it| it.1)
+    //     .collect::<Vec<_>>();
+
+    // for to_delete in to_delete {
+    //     elements.remove(&to_delete).unwrap();
+    //     taffy.remove(to_delete).unwrap();
+    // }
+
+    // let mut idx = 0;
+
+    // while let false = taffy.child_at_index(parent, idx).unwrap() == processing {
+    //     idx += 1;
+    // }
+
+    // taffy.remove(processing).unwrap();
+
+    // mount_children(registry, tree, parent, with, Some(idx));
 
     // todo update style??
 }
 
 pub(crate) fn mount_children<T: Element>(
     registry: &mut TypeRegistry,
-    tree: &mut ElementTree,
+    tree: &mut WidgetTree,
     parent: NodeId,
     element: T,
     idx: Option<usize>,
 ) {
     struct Mounter<'a> {
-        tree: &'a mut ElementTree,
+        tree: &'a mut WidgetTree,
         parent: NodeId,
         registry: &'a mut TypeRegistry,
-        idx: Option<usize>,
     }
 
     impl<'a> InsertContext for Mounter<'a> {
-        fn child_work<E: Element>(&mut self, e: E, parent: NodeId) {
-            mount_children(&mut self.registry, self.tree, parent, e, None)
-        }
-
-        fn insert(&mut self, el: MountedWidget) -> NodeId {
-            if let Some(idx) = self.idx {
-                self.tree.insert_at(el, self.parent, idx)
-            } else {
-                self.tree.insert(el, self.parent)
-            }
-        }
-
-        fn registry(&mut self) -> &mut TypeRegistry {
-            &mut self.registry
+        fn insert_child<E: Element>(&mut self, e: E) {
+            mount_children(&mut self.registry, self.tree, self.parent, e, None)
         }
     }
 
-    element.insert(&mut Mounter {
-        tree,
-        parent,
-        registry,
-        idx,
-    })
+    let BuildResult { widget, children } = element.create(registry);
+
+    if let Some(idx) = idx {
+        tree.insert_at(widget, parent, idx);
+    } else {
+        tree.insert(widget, parent);
+    }
+
+    if let Some(children) = children {
+        children.insert_children(&mut Mounter {
+            tree,
+            parent,
+            registry,
+        });
+    }
 }

@@ -21,7 +21,7 @@ pub trait Reducer<M> {
 #[derive(Reflect, Debug, Clone)]
 #[reflect(StateTrait)]
 /// Some state for a view.
-/// State is the only way to change a view and expect it to corrextly re-render.
+/// State is the only way to change a view and expect it to correctly re-render.
 /// Since we use reflection, state must be stored as a field on a struct implementing [View] for it to work as expected.
 /// ```
 /// # use paladin_view::prelude::*;
@@ -56,6 +56,10 @@ pub struct State<M: Clone + 'static, S: Reducer<M> + 'static> {
     #[reflect(ignore)]
     #[reflect(default = "create_state_fake")]
     create_state: fn() -> S,
+}
+
+impl Reducer<()> for () {
+    fn reduce(&mut self, _: ()) {}
 }
 
 pub(crate) trait Message: Clone + 'static {}

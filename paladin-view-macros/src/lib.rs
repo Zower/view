@@ -12,7 +12,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 #ident::register_type_dependencies(registry);
             }
 
-            fn dyn_cmp(&self, child_id: ::paladin_view::taffy::NodeId, tree: &mut ::paladin_view::app::ElementTree, registry: &mut ::paladin_view::reflect::TypeRegistry) {
+            fn dyn_cmp(&self, child_id: ::paladin_view::taffy::NodeId, tree: &mut ::paladin_view::app::WidgetTree, registry: &mut ::paladin_view::reflect::TypeRegistry) {
                 ::paladin_view::app::iter_elements_cmp(tree, child_id, self.build(), registry)
             }
         }

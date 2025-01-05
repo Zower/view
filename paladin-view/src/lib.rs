@@ -1,4 +1,7 @@
-use std::fmt::Debug;
+// #![feature(type_alias_impl_trait)]
+#![feature(precise_capturing_in_traits)]
+
+use std::{fmt::Debug, hint::unreachable_unchecked};
 
 use app::App;
 use bevy_reflect::{Reflect, TypeRegistry};
@@ -15,8 +18,6 @@ mod text;
 
 mod utils;
 
-use rgb::RGBA8;
-use serde::{Deserialize, Serialize};
 use state::ReflectStateTrait;
 use taffy::NodeId;
 pub use utils::*;
@@ -68,14 +69,13 @@ pub fn run<V: View>(v: V) -> crate::Result<()> {
     .run(el)
 }
 
-impl<T: View + 'static> Element for T {
-    fn insert(mut self, context: &mut impl InsertContext) {
-        self.register(context.registry());
+impl<T: View> Element for T {
+    fn create(mut self, registry: &mut TypeRegistry) -> BuildResult<impl InsertChildren> {
+        self.register(registry);
 
         app::iter_fields(self.as_reflect_mut(), |_, field| {
-            if let Some(reflect_state) = context
-                .registry()
-                .get_type_data::<ReflectStateTrait>(field.type_id())
+            if let Some(reflect_state) =
+                registry.get_type_data::<ReflectStateTrait>(field.type_id())
             {
                 let Some(state) = reflect_state.get_mut(field) else {
                     return;
@@ -86,112 +86,111 @@ impl<T: View + 'static> Element for T {
         });
 
         let built = self.build();
+        built.create(registry)
 
-        let boxed = ViewWidget(Box::new(self)).into();
+        // let boxed = ViewWidget(Box::new(self)).into();
 
-        let id = context.insert(boxed);
-        context.child_work(built, id);
+        // let id = context.insert(boxed);
+        // context.child_work(built, id);
 
         // mount_children(registry, tree, id, built, idx)
     }
 
-    fn compare_rebuild(
-        mut self,
-        old: MountedWidget,
-        context: &mut impl RebuildContext,
-    ) -> CompareResult<impl Element> {
-        let MountedWidget::View(mut view) = old else {
-            return CompareResult::Replace { with: self };
-        };
+    #[allow(refining_impl_trait)]
+    fn compare_rebuild(self, old: MountedWidget) -> BuildResult<impl RebuildChildren> {
+        // let MountedWidget::View(mut view) = old else {
+        //     return CompareResult::Replace { with: self };
+        // };
 
-        if self.type_id() != view.0.type_id() {
-            return CompareResult::Replace { with: self };
-        }
+        // if self.type_id() != view.0.type_id() {
+        //     return CompareResult::Replace { with: self };
+        // }
 
-        app::iter_fields(self.as_reflect_mut(), |index, field| {
-            if let Some(reflect_state) = context
-                .registry()
-                .get_type_data::<ReflectStateTrait>(field.type_id())
-            {
-                // todo uggly
-                if let Some(state) = reflect_state.get_mut(field) {
-                    if let bevy_reflect::ReflectMut::Struct(st) = view.0.reflect_mut() {
-                        state.reuse(st.field_at_mut(index).unwrap());
-                    } else if let bevy_reflect::ReflectMut::Enum(_) = view.0.reflect_mut() {
-                        panic!();
-                        // state.reuse(en.field_at_mut(index).unwrap());
-                    } else {
-                        panic!()
-                    }
-                }
-            }
-        });
+        // app::iter_fields(self.as_reflect_mut(), |index, field| {
+        //     if let Some(reflect_state) = context
+        //         .registry()
+        //         .get_type_data::<ReflectStateTrait>(field.type_id())
+        //     {
+        // todo uggly
+        // if let Some(state) = reflect_state.get_mut(field) {
+        //     if let bevy_reflect::ReflectMut::Struct(st) = view.0.reflect_mut() {
+        //         state.reuse(st.field_at_mut(index).unwrap());
+        //     } else if let bevy_reflect::ReflectMut::Enum(_) = view.0.reflect_mut() {
+        //         panic!();
+        //         // state.reuse(en.field_at_mut(index).unwrap());
+        //     } else {
+        //         panic!()
+        //     }
+        // }
+        // }
+        // });
 
         let built = self.build();
 
+        built.compare_rebuild(old)
+
+        // built.compare_rebuild(old)
+
         // can be optimized
-        *view.0.as_any_mut().downcast_mut::<Self>().unwrap() = self;
+        // *view.0.as_any_mut().downcast_mut::<Self>().unwrap() = self;
 
-        context.insert(MountedWidget::View(view));
+        // context.insert(MountedWidget::View(view));
 
-        context.child_work(built);
-
-        return CompareResult::Success;
+        // context.child_work(built);
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum ClientMessage {
-    SetState(String),
-    RequestState,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct Frame {
-    data: Vec<RGBA8>,
-    height: usize,
-    width: usize,
-    stride: usize,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum ServerMessage {
-    State(String),
-    NoState,
-}
-
 /// Mostly a hack around functions being monomorphized at the call-site.
-/// See [Element::insert_perform_per_child]
+/// See [Element::insert]
 pub trait InsertContext {
-    fn child_work<E: Element>(&mut self, e: E, parent: NodeId);
-    fn insert(&mut self, m: MountedWidget) -> NodeId;
-    fn registry(&mut self) -> &mut TypeRegistry;
+    fn insert_child<E: Element>(&mut self, e: E);
 }
 
 /// Mostly a hack around functions being monomorphized at the call-site.
 /// See [Element::compare_rebuild]
 pub trait RebuildContext {
-    fn child_work<E: Element>(&mut self, e: E);
-    fn insert(&mut self, m: MountedWidget) -> NodeId;
-    fn registry(&mut self) -> &mut TypeRegistry;
+    fn rebuild_child<E: Element>(&mut self, e: E);
 }
 
-/// The result of a rebuild.
+/// The result of a build.
 /// See [Element::compare_rebuild]
-pub enum CompareResult<E> {
-    Success,
-    Replace { with: E },
+pub struct BuildResult<C> {
+    pub widget: MountedWidget,
+    pub children: Option<C>,
+}
+
+pub trait RebuildChildren: 'static {
+    fn rebuild_children(self, context: &mut impl RebuildContext);
+}
+
+pub trait InsertChildren: 'static {
+    fn insert_children(self, context: &mut impl InsertContext);
+}
+
+pub enum LeafNode {}
+
+impl RebuildChildren for LeafNode {
+    fn rebuild_children(self, _: &mut impl RebuildContext) {
+        // Safety: Impossible to construct LeafNode
+        unsafe { unreachable_unchecked() }
+    }
+}
+
+impl InsertChildren for LeafNode {
+    fn insert_children(self, _: &mut impl InsertContext) {
+        // Safety: Impossible to construct LeafNode
+        unsafe { unreachable_unchecked() }
+    }
 }
 
 /// Elements are some type that can be used to build a widget tree by inserting a [MountedWidget] at some given position.
 /// Elements must also contain their own children, and perform any work the framework demands of them via [InsertContext] and [RebuildContext].
 /// In some ways Elements are the bridge between both [View]s and [Widget]s, as it will commonly be implemented by both.
 /// Usually one won't manually implement this trait (though, you can.), instead prefer to create [View]s.
-pub trait Element: 'static {
-    /// Each element is responsible for inserting into the tree.
-    /// The element is expected to insert some [MountedWidget] that it represents into the tree via [InsertContext::insert].
-    /// Additionally, if the element has any children (or just other elements that should be inserted underneath it), call [InsertContext::child_work] once per child.
-    fn insert(self, context: &mut impl InsertContext);
+pub trait Element {
+    /// Each element is expected to create a [MountedWidget].
+    /// Additionally, if the element has any children, those may additionally be specified by returning a type that knows how to create them (The InsertChildren trait).
+    fn create(self, registry: &mut TypeRegistry) -> BuildResult<impl InsertChildren>;
 
     /// When the element tree is rebuilt because of a dirty view, the tree must be diffed. This function is called for each new element (returned by [View::build]) down the tree from the dirty widget,
     /// and it is the responsibility of that element to:
@@ -199,14 +198,10 @@ pub trait Element: 'static {
     /// * If old can be used to build a new MountedWidget, rebuild. Reuse any allocations or state that has accumulated in the old element.
     /// * Additionally, if the new element has any children, call [RebuildContext::child_work] once per child.
     /// * Then return [CompareResult::Success], indicating a successful rebuild and insertion.
-    fn compare_rebuild(
-        self,
-        old: MountedWidget,
-        context: &mut impl RebuildContext,
-    ) -> CompareResult<impl Element>;
+    fn compare_rebuild(self, old: MountedWidget) -> BuildResult<impl RebuildChildren>;
 }
 
-/// Views are the building blocks of an application. They can be used to compose other views, elements, and any mix of the two.
+/// Views are the building blocks of an application. They can be used to compose widgets or other views.
 ///
 /// ```
 /// # use paladin_view::prelude::*;
@@ -233,8 +228,12 @@ pub trait Element: 'static {
 ///
 /// ```
 ///
+///
+
+// pub type Fragment = impl Element;
+
 pub trait View: DynView {
-    fn build(&self) -> impl Element
+    fn build(&self) -> impl Element + use<Self>
     where
         Self: Sized;
 }
@@ -242,7 +241,7 @@ pub trait View: DynView {
 #[doc(hidden)]
 pub trait DynView: Reflect {
     fn register(&self, registry: &mut TypeRegistry);
-    fn dyn_cmp(&self, child_id: NodeId, tree: &mut app::ElementTree, registry: &mut TypeRegistry);
+    fn dyn_cmp(&self, child_id: NodeId, tree: &mut app::WidgetTree, registry: &mut TypeRegistry);
 }
 
 pub struct Canvas {

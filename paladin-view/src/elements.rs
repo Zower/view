@@ -1,3 +1,4 @@
+use bevy_reflect::TypeRegistry;
 pub use button::*;
 use cosmic_text::FontSystem;
 pub use stack::HStack;
@@ -7,11 +8,12 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut},
 };
-use taffy::{prelude::auto, LengthPercentage, NodeId};
+use taffy::{prelude::auto, LengthPercentage};
 pub use text::*;
 
 use crate::{
-    Canvas, CompareResult, Element, InsertContext, KeyEvent, Layout, RebuildContext, View,
+    BuildResult, Canvas, Element, InsertChildren, InsertContext, KeyEvent, Layout, RebuildChildren,
+    RebuildContext,
 };
 
 /// An element that has been mounted into the tree.
@@ -21,7 +23,6 @@ pub enum MountedWidget {
     Button(Button),
     Text(Text),
     HStack(HStack),
-    View(ViewWidget),
     Custom(CustomWidget),
 }
 
@@ -157,11 +158,6 @@ pub trait Widget {
     fn render(&self, layout: crate::Layout, canvas: &mut Canvas) {}
 }
 
-/// A [View] that has been mounted into the tree as a [MountedWidget::View].
-pub struct ViewWidget(pub(crate) Box<dyn View>);
-
-impl Widget for ViewWidget {}
-
 /// The style of a widget. Styling decides final layout (size, position) and is based on the flexbox algorithm, thanks to [taffy].
 #[derive(Debug, Clone)]
 pub struct Style(pub taffy::Style);
@@ -217,9 +213,13 @@ pub trait Styleable: Sized {
 mod button {
     use std::fmt::Debug;
 
+    use bevy_reflect::TypeRegistry;
     use bon::builder;
 
-    use crate::{state::Reducer, state::State, ButtonMessage, Color, Element, Layout, Triggerable};
+    use crate::{
+        state::{Reducer, State},
+        ButtonMessage, Color, Element, Layout, LeafNode, Triggerable,
+    };
 
     use super::{MountedWidget, Style, Styleable, Widget, WidgetEvent};
 
@@ -230,20 +230,19 @@ mod button {
     }
 
     impl Element for Button {
-        fn insert(self, context: &mut impl crate::InsertContext) {
-            context.insert(MountedWidget::Button(self));
+        #[allow(refining_impl_trait)]
+        fn create(self, _: &mut TypeRegistry) -> crate::BuildResult<LeafNode> {
+            crate::BuildResult {
+                widget: MountedWidget::Button(self),
+                children: None,
+            }
         }
 
-        fn compare_rebuild(
-            self,
-            old: MountedWidget,
-            context: &mut impl crate::RebuildContext,
-        ) -> crate::CompareResult<impl Element> {
-            if matches!(old, MountedWidget::Button(_)) {
-                context.insert(MountedWidget::Button(self));
-                crate::CompareResult::<Self>::Success
-            } else {
-                crate::CompareResult::Replace { with: self }
+        #[allow(refining_impl_trait)]
+        fn compare_rebuild(self, _: MountedWidget) -> crate::BuildResult<LeafNode> {
+            crate::BuildResult {
+                widget: MountedWidget::Button(self),
+                children: None,
             }
         }
     }
@@ -317,10 +316,11 @@ mod button {
 }
 
 mod text {
+    use bevy_reflect::TypeRegistry;
     use bon::bon;
     use cosmic_text::{Attrs, AttrsList, Buffer, BufferLine, FontSystem, LineEnding, Metrics};
 
-    use crate::{Element, InsertContext, RebuildContext};
+    use crate::{Element, LeafNode};
 
     use super::{MountedWidget, Style, Styleable, Widget};
 
@@ -334,23 +334,36 @@ mod text {
     }
 
     impl Element for Text {
-        fn insert(self, context: &mut impl InsertContext) {
-            context.insert(super::MountedWidget::Text(self));
-        }
-
-        fn compare_rebuild(
-            self,
-            old: super::MountedWidget,
-            context: &mut impl RebuildContext,
-        ) -> crate::CompareResult<impl Element> {
-            if matches!(old, MountedWidget::Text(_)) {
-                // todo
-                context.insert(MountedWidget::Text(self));
-                crate::CompareResult::<Self>::Success
-            } else {
-                crate::CompareResult::Replace { with: self }
+        #[allow(refining_impl_trait)]
+        fn create(self, _: &mut TypeRegistry) -> crate::BuildResult<LeafNode> {
+            crate::BuildResult {
+                widget: MountedWidget::Text(self),
+                children: None,
             }
         }
+
+        #[allow(refining_impl_trait)]
+        fn compare_rebuild(self, _: MountedWidget) -> crate::BuildResult<LeafNode> {
+            // todo
+            crate::BuildResult {
+                widget: MountedWidget::Text(self),
+                children: None,
+            }
+        }
+
+        // fn compare_rebuild(
+        //     self,
+        //     old: super::MountedWidget,
+        //     context: &mut impl RebuildContext,
+        // ) -> crate::CompareResult<impl Element> {
+        //     if matches!(old, MountedWidget::Text(_)) {
+        //         // todo
+        //         context.insert(MountedWidget::Text(self));
+        //         crate::CompareResult::<Self>::Success
+        //     } else {
+        //         crate::CompareResult::Replace { with: self }
+        //     }
+        // }
     }
 
     #[bon]
@@ -372,7 +385,7 @@ mod text {
             wrap: Option<cosmic_text::Wrap>,
             font: Option<&'static str>,
             size: Option<f32>,
-        ) -> impl Element {
+        ) -> Text {
             let size = size.unwrap_or(25.);
             let attrs = Attrs::new()
                 .color(color.unwrap_or_default().into())
@@ -412,20 +425,19 @@ mod text {
     }
 
     impl Element for &'static str {
-        fn insert(self, context: &mut impl InsertContext) {
-            context.insert(super::MountedWidget::Text(text(self)));
+        #[allow(refining_impl_trait)]
+        fn create(self, _: &mut TypeRegistry) -> crate::BuildResult<LeafNode> {
+            crate::BuildResult {
+                widget: MountedWidget::Text(text(self)),
+                children: None,
+            }
         }
 
-        fn compare_rebuild(
-            self,
-            old: MountedWidget,
-            context: &mut impl RebuildContext,
-        ) -> crate::CompareResult<impl Element> {
-            if matches!(old, MountedWidget::Text(_)) {
-                context.insert(MountedWidget::Text(text(self)));
-                crate::CompareResult::<Self>::Success
-            } else {
-                crate::CompareResult::Replace { with: self }
+        #[allow(refining_impl_trait)]
+        fn compare_rebuild(self, _: MountedWidget) -> crate::BuildResult<LeafNode> {
+            crate::BuildResult {
+                widget: MountedWidget::Text(text(self)),
+                children: None,
             }
         }
     }
@@ -498,16 +510,35 @@ mod stack {
 
     use std::{fmt::Debug, marker::PhantomData};
 
-    use crate::{CompareResult, Element};
+    use bevy_reflect::TypeRegistry;
 
-    use super::{ChildInsertBuilder, ChildRebuildBuilder, ChildView, MountedWidget, Widget};
+    use crate::{BuildResult, Element, InsertChildren, RebuildChildren};
+
+    use super::{ChildInsertBuilder, ChildRebuildBuilder, ChildView, Widget};
 
     #[derive(Debug)]
     pub struct HStack;
 
-    pub(crate) struct HStackElement<F, Children: ChildView<F>> {
+    pub struct HStackElement<F, Children: ChildView<F>> {
         children: Children,
         phantom: PhantomData<F>,
+    }
+
+    pub(crate) struct HStackChildren<F, Children: ChildView<F>> {
+        children: Children,
+        phantom: PhantomData<F>,
+    }
+
+    impl<F: 'static, C: ChildView<F> + 'static> RebuildChildren for HStackChildren<F, C> {
+        fn rebuild_children(self, builder: &mut impl crate::RebuildContext) {
+            self.children.call_each(ChildRebuildBuilder { pc: builder });
+        }
+    }
+
+    impl<F: 'static, C: ChildView<F> + 'static> InsertChildren for HStackChildren<F, C> {
+        fn insert_children(self, builder: &mut impl crate::InsertContext) {
+            self.children.call_each(ChildInsertBuilder { pc: builder });
+        }
     }
 
     impl<F, Children: ChildView<F>> Element for HStackElement<F, Children>
@@ -515,27 +546,33 @@ mod stack {
         F: 'static,
         Children: 'static,
     {
-        fn insert(self, context: &mut impl crate::InsertContext) {
-            let id = context.insert(super::MountedWidget::HStack(HStack));
-
-            self.children
-                .call_each(ChildInsertBuilder { pc: context, id })
+        fn create(self, _: &mut TypeRegistry) -> BuildResult<impl InsertChildren> {
+            crate::BuildResult {
+                widget: super::MountedWidget::HStack(HStack),
+                children: Some(HStackChildren {
+                    children: self.children,
+                    phantom: PhantomData,
+                }),
+            }
         }
 
-        fn compare_rebuild(
-            self,
-            old: super::MountedWidget,
-            context: &mut impl crate::RebuildContext,
-        ) -> CompareResult<impl Element + 'static> {
-            if !matches!(old, MountedWidget::HStack(_)) {
-                return CompareResult::Replace { with: self };
+        fn compare_rebuild(self, _: super::MountedWidget) -> BuildResult<impl RebuildChildren> {
+            // if !matches!(old, MountedWidget::HStack(_)) {
+            //     return CompareResult::Replace { with: self };
+            // }
+
+            // context.insert(super::MountedWidget::HStack(HStack));
+
+            // self.children.call_each(ChildRebuildBuilder { pc: context });
+            crate::BuildResult {
+                widget: super::MountedWidget::HStack(HStack),
+                children: Some(HStackChildren {
+                    children: self.children,
+                    phantom: PhantomData,
+                }),
             }
 
-            context.insert(super::MountedWidget::HStack(HStack));
-
-            self.children.call_each(ChildRebuildBuilder { pc: context });
-
-            crate::CompareResult::<Self>::Success
+            // crate::CompareResult::<Self>::Success
         }
     }
 
@@ -559,7 +596,8 @@ mod stack {
     /// );
     ///
     /// ```
-    pub fn hstack<F: 'static, CV: ChildView<F> + 'static>(child: CV) -> impl Element {
+    #[allow(private_interfaces)]
+    pub fn hstack<F: 'static, CV: ChildView<F> + 'static>(child: CV) -> HStackElement<F, CV> {
         HStackElement {
             children: child,
             phantom: PhantomData,
@@ -612,31 +650,61 @@ pub enum OneOf<A, B> {
 }
 
 impl<A: Element, B: Element> Element for OneOf<A, B> {
-    fn insert(self, context: &mut impl crate::InsertContext) {
+    fn create(self, registry: &mut TypeRegistry) -> crate::BuildResult<impl InsertChildren> {
         match self {
-            OneOf::A(a) => a.insert(context),
-            OneOf::B(b) => b.insert(context),
+            OneOf::A(a) => {
+                let result = a.create(registry);
+                BuildResult {
+                    widget: result.widget,
+                    children: result.children.map(|children| OneOf::<_, _>::A(children)),
+                }
+            }
+            OneOf::B(b) => {
+                let result = b.create(registry);
+
+                BuildResult {
+                    widget: result.widget,
+                    children: result.children.map(|children| OneOf::<_, _>::B(children)),
+                }
+            }
         }
     }
 
-    fn compare_rebuild(
-        self,
-        old: MountedWidget,
-        context: &mut impl RebuildContext,
-    ) -> CompareResult<impl Element> {
+    fn compare_rebuild(self, old: MountedWidget) -> BuildResult<impl RebuildChildren> {
         match self {
-            OneOf::A(a) => match a.compare_rebuild(old, context) {
-                CompareResult::Success => CompareResult::Success,
-                CompareResult::Replace { with } => CompareResult::Replace {
-                    with: OneOf::<_, _>::A(with),
-                },
-            },
-            OneOf::B(b) => match b.compare_rebuild(old, context) {
-                CompareResult::Success => CompareResult::Success,
-                CompareResult::Replace { with } => CompareResult::Replace {
-                    with: OneOf::<_, _>::B(with),
-                },
-            },
+            OneOf::A(a) => {
+                let result = a.compare_rebuild(old);
+                BuildResult {
+                    widget: result.widget,
+                    children: result.children.map(|children| OneOf::<_, _>::A(children)),
+                }
+            }
+            OneOf::B(b) => {
+                let result = b.compare_rebuild(old);
+
+                BuildResult {
+                    widget: result.widget,
+                    children: result.children.map(|children| OneOf::<_, _>::B(children)),
+                }
+            }
+        }
+    }
+}
+
+impl<A: RebuildChildren, B: RebuildChildren> RebuildChildren for OneOf<A, B> {
+    fn rebuild_children(self, context: &mut impl RebuildContext) {
+        match self {
+            OneOf::A(a) => a.rebuild_children(context),
+            OneOf::B(b) => b.rebuild_children(context),
+        }
+    }
+}
+
+impl<A: InsertChildren, B: InsertChildren> InsertChildren for OneOf<A, B> {
+    fn insert_children(self, context: &mut impl InsertContext) {
+        match self {
+            OneOf::A(a) => a.insert_children(context),
+            OneOf::B(b) => b.insert_children(context),
         }
     }
 }
@@ -663,7 +731,6 @@ pub(crate) trait ChildViewFnBuilder {
 
 struct ChildInsertBuilder<'a, Pc: InsertContext> {
     pc: &'a mut Pc,
-    id: NodeId,
 }
 
 struct ChildRebuildBuilder<'a, Pc: RebuildContext> {
@@ -672,13 +739,13 @@ struct ChildRebuildBuilder<'a, Pc: RebuildContext> {
 
 impl<'a, Pc: InsertContext> ChildViewFnBuilder for ChildInsertBuilder<'a, Pc> {
     fn create_fn<E: Element>(&mut self) -> impl FnMut(E) {
-        |e| self.pc.child_work(e, self.id)
+        |e| self.pc.insert_child(e)
     }
 }
 
 impl<'a, Pc: RebuildContext> ChildViewFnBuilder for ChildRebuildBuilder<'a, Pc> {
     fn create_fn<E: Element>(&mut self) -> impl FnMut(E) {
-        |e| self.pc.child_work(e)
+        |e| self.pc.rebuild_child(e)
     }
 }
 
@@ -724,14 +791,6 @@ impl Deref for Style {
 impl DerefMut for Style {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-impl std::fmt::Debug for ViewWidget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ViewElement")
-            .field(&self.0.as_reflect())
-            .finish()
     }
 }
 

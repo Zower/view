@@ -1,10 +1,16 @@
+#![feature(precise_capturing_in_traits)]
+
 use std::{io, path::PathBuf};
 
+use bevy_reflect::TypeRegistry;
 use components::root::Root;
 
 use cosmic_text::FontSystem;
 use miette::IntoDiagnostic;
-use paladin_view::{prelude::*, CustomWidget, Style, Styleable};
+use paladin_view::{
+    prelude::*, BuildResult, CustomWidget, InsertChildren, LeafNode, RebuildChildren, Style,
+    Styleable,
+};
 use paladinc::{lsp::LspResponseTransmitter, ts::highlight};
 mod components;
 
@@ -68,7 +74,7 @@ impl Widget for BufferWidget {
 }
 
 impl Element for BufferElement {
-    fn insert(self, context: &mut impl paladin_view::InsertContext) {
+    fn create(self, _: &mut TypeRegistry) -> BuildResult<impl InsertChildren> {
         let mut qc = tree_sitter::QueryCursor::new();
         let query = tree_sitter::Query::new(
             &tree_sitter_rust::language(),
@@ -90,32 +96,33 @@ impl Element for BufferElement {
             style: self.style,
         };
 
-        context.insert(paladin_view::MountedWidget::Custom(CustomWidget(Box::new(
-            widget,
-        ))));
+        BuildResult {
+            widget: paladin_view::MountedWidget::Custom(CustomWidget(Box::new(widget))),
+            children: None::<LeafNode>,
+        }
     }
 
     fn compare_rebuild(
         self,
         old: paladin_view::MountedWidget,
-        context: &mut impl paladin_view::RebuildContext,
-    ) -> paladin_view::CompareResult<impl Element> {
+    ) -> paladin_view::BuildResult<impl RebuildChildren> {
         let paladin_view::MountedWidget::Custom(CustomWidget(custom)) = old else {
-            return paladin_view::CompareResult::Replace { with: self };
+            panic!()
         };
 
         let Ok(old) = custom.into_any().downcast::<BufferWidget>() else {
-            return paladin_view::CompareResult::Replace { with: self };
+            panic!()
         };
 
-        if old.buffer.buffer.path.to_str() != Some(&self.path) {
-            panic!("New path")
-        }
+        // if old.buffer.buffer.path.to_str() != Some(&self.path) {
+        //     panic!("New path")
+        // }
 
         // no need to replace
-        context.insert(paladin_view::MountedWidget::Custom(CustomWidget(old)));
-
-        return paladin_view::CompareResult::Success;
+        BuildResult {
+            widget: paladin_view::MountedWidget::Custom(CustomWidget(old)),
+            children: None::<LeafNode>,
+        }
     }
 }
 
