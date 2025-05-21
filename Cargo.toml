@@ -1,0 +1,25 @@
+[package]
+name = "paladin"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = ["paladin-view", "paladin-view-macros", "paladin-core"]
+
+[dependencies]
+paladin-view = { version = "0.1.0", path = "paladin-view" }
+paladinc = { version = "0.1.0", path = "paladin-core", package = "paladin-core" }
+bevy_reflect = "0.14.1"
+cosmic-text.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+lsp-types.workspace = true
+miette.workspace = true
+
+[workspace.dependencies]
+tree-sitter = "0.22.2"
+tree-sitter-rust = { git = "https://github.com/Zower/tree-sitter-rust.git" }
+lsp-types = "0.95.0"
+miette = { version = "5.7.0", features = ["fancy"] }
+cosmic-text = "0.12.1"
+serde = { version = "1.0.192", features = ["derive"] }
